@@ -112,12 +112,25 @@ class ApiClient {
     return this.request<any>(`/apps/${id}/restart`, { method: 'POST' });
   }
 
-  async getVersions(id: string) {
+  async getAppVersions(id: string) {
     return this.request<any[]>(`/apps/${id}/versions`);
   }
 
-  async rollback(appId: string, deployId: string) {
-    return this.request<any>(`/apps/${appId}/rollback/${deployId}`, { method: 'POST' });
+  async rollbackApp(appId: string, versionId: string) {
+    return this.request<any>(`/apps/${appId}/rollback/${versionId}`, { method: 'POST' });
+  }
+
+  async deleteVersion(appId: string, versionId: string) {
+    return this.request<any>(`/apps/${appId}/versions/${versionId}`, { method: 'DELETE' });
+  }
+
+  // GitHub/Webhook
+  async getGithubWorkflow(appId: string) {
+    return this.request<string>(`/webhook/github/workflow/${appId}`);
+  }
+
+  async regenerateWebhookSecret(appId: string) {
+    return this.request<{ secret: string }>(`/webhook/regenerate-secret/${appId}`, { method: 'POST' });
   }
 
   // Deploy

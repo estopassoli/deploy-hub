@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,49 +18,54 @@ import {
   Shield,
   Webhook,
   FileCode,
-  ExternalLink
+  ExternalLink,
+  Loader2
 } from 'lucide-react';
-import { mockApps } from '@/data/mockData';
 import { toast } from 'sonner';
+import api from '@/lib/api';
+import { App } from '@/types/app';
 
 export default function GitHub() {
-  const [selectedAppId, setSelectedAppId] = useState(mockApps[0].id);
+  const [apps, setApps] = useState<App[]>([]);
+  const [selectedAppId, setSelectedAppId] = useState<string>('');
   const [copiedYaml, setCopiedYaml] = useState(false);
   const [copiedSecret, setCopiedSecret] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [workflowYaml, setWorkflowYaml] = useState('');
   
-  const selectedApp = mockApps.find(app => app.id === selectedAppId);
-  const webhookSecret = 'whsec_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  const selectedApp = apps.find(app => app.id === selectedAppId);
 
-  const generateYaml = () => {
-    return `name: Deploy to VPS
+  useEffect(() => {
+    loadApps();
+  }, []);
 
-on:
-  push:
-    branches:
-      - ${selectedApp?.branch || 'main'}
+  useEffect(() => {
+    if (selectedAppId) {
+      loadWorkflow();
+    }
+  }, [selectedAppId]);
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Trigger Deploy Webhook
-        run: |
-          curl -X POST \\
-            -H "Content-Type: application/json" \\
-            -H "X-Hub-Signature-256: sha256=\${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \\
-            -d '{
-              "app": "${selectedApp?.name}",
-              "branch": "${selectedApp?.branch}",
-              "commit": "\${{ github.sha }}",
-              "message": "\${{ github.event.head_commit.message }}"
-            }' \\
-            https://62.72.9.22:10001/api/deploy/webhook
-            
-      - name: Check Deploy Status
-        run: |
-          echo "Deploy triggered for ${selectedApp?.name}"
-          echo "Commit: \${{ github.sha }}"`;
+  const loadApps = async () => {
+    try {
+      const data = await api.getApps();
+      setApps(data);
+      if (data.length > 0) {
+        setSelectedAppId(data[0].id);
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to load apps');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadWorkflow = async () => {
+    try {
+      const yaml = await api.getGithubWorkflow(selectedAppId);
+      setWorkflowYaml(yaml);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to load workflow');
+    }
   };
 
   const copyToClipboard = (text: string, type: 'yaml' | 'secret') => {
@@ -75,9 +80,36 @@ jobs:
     toast.success('Copied to clipboard!');
   };
 
-  const regenerateSecret = () => {
-    toast.success('New webhook secret generated');
+  const regenerateSecret = async () => {
+    try {
+      await api.regenerateWebhookSecret(selectedAppId);
+      toast.success('New webhook secret generated');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to regenerate secret');
+    }
   };
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex h-[50vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (apps.length === 0) {
+    return (
+      <Layout>
+        <div className="flex h-[50vh] flex-col items-center justify-center text-center">
+          <Github className="h-12 w-12 text-muted-foreground mb-4" />
+          <h2 className="text-xl font-semibold">No apps found</h2>
+          <p className="text-muted-foreground mt-2">Deploy an app first to configure GitHub Actions</p>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -101,7 +133,7 @@ jobs:
               <SelectValue placeholder="Select app" />
             </SelectTrigger>
             <SelectContent>
-              {mockApps.map(app => (
+              {apps.map(app => (
                 <SelectItem key={app.id} value={app.id}>
                   <div className="flex items-center gap-2">
                     <span>{app.name}</span>
@@ -128,13 +160,13 @@ jobs:
               </p>
               <div className="flex gap-2">
                 <Input
-                  value={webhookSecret}
+                  value={selectedApp.webhookSecret || 'Not generated'}
                   readOnly
                   className="font-mono text-sm"
                 />
                 <Button 
                   variant="outline" 
-                  onClick={() => copyToClipboard(webhookSecret, 'secret')}
+                  onClick={() => copyToClipboard(selectedApp.webhookSecret || '', 'secret')}
                 >
                   {copiedSecret ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 </Button>
@@ -155,13 +187,13 @@ jobs:
               </p>
               <div className="flex gap-2">
                 <Input
-                  value={`https://62.72.9.22:10001/api/deploy/webhook`}
+                  value={`${import.meta.env.VITE_API_URL || 'http://62.72.9.22:10001'}/api/webhook/github`}
                   readOnly
                   className="font-mono text-sm"
                 />
                 <Button 
                   variant="outline" 
-                  onClick={() => copyToClipboard(`https://62.72.9.22:10001/api/deploy/webhook`, 'yaml')}
+                  onClick={() => copyToClipboard(`${import.meta.env.VITE_API_URL || 'http://62.72.9.22:10001'}/api/webhook/github`, 'yaml')}
                 >
                   <Copy className="h-4 w-4" />
                 </Button>
@@ -178,7 +210,7 @@ jobs:
                 <Button 
                   variant="outline" 
                   size="sm"
-                  onClick={() => copyToClipboard(generateYaml(), 'yaml')}
+                  onClick={() => copyToClipboard(workflowYaml, 'yaml')}
                 >
                   {copiedYaml ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                   {copiedYaml ? 'Copied!' : 'Copy'}
@@ -188,7 +220,7 @@ jobs:
                 Create this file at <code className="px-1 py-0.5 bg-secondary rounded text-primary">.github/workflows/deploy.yml</code> in your repository
               </p>
               <pre className="p-4 overflow-auto font-mono text-sm text-foreground/90 bg-background terminal-scroll">
-                {generateYaml()}
+                {workflowYaml}
               </pre>
             </div>
 
@@ -236,7 +268,7 @@ jobs:
             <div className="flex justify-center">
               <Button variant="outline" asChild>
                 <a 
-                  href={selectedApp.repository.replace('git@github.com:', 'https://github.com/').replace('.git', '/settings/secrets/actions')}
+                  href={selectedApp.repository?.replace('git@github.com:', 'https://github.com/').replace('.git', '/settings/secrets/actions') || '#'}
                   target="_blank"
                   rel="noopener noreferrer"
                 >

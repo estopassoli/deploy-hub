@@ -24,6 +24,7 @@ export interface App {
   lastDeploy: string;
   cpu?: number;
   memory?: number;
+  webhookSecret?: string;
 }
 
 export interface DeployConfig {

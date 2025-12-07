@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,9 +14,9 @@ import {
   Clock,
   GitCommit,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Loader2
 } from 'lucide-react';
-import { mockApps } from '@/data/mockData';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -30,18 +30,103 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import api from '@/lib/api';
+import { App } from '@/types/app';
+
+interface Version {
+  id: string;
+  timestamp: string;
+  commitHash?: string;
+  commitMessage?: string;
+  isCurrent: boolean;
+}
 
 export default function Versions() {
-  const [selectedAppId, setSelectedAppId] = useState(mockApps[0].id);
-  const selectedApp = mockApps.find(app => app.id === selectedAppId);
+  const [apps, setApps] = useState<App[]>([]);
+  const [selectedAppId, setSelectedAppId] = useState<string>('');
+  const [versions, setVersions] = useState<Version[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+  
+  const selectedApp = apps.find(app => app.id === selectedAppId);
 
-  const handleRollback = (versionId: string) => {
-    toast.success(`Rolling back to version ${versionId}...`);
+  useEffect(() => {
+    loadApps();
+  }, []);
+
+  useEffect(() => {
+    if (selectedAppId) {
+      loadVersions();
+    }
+  }, [selectedAppId]);
+
+  const loadApps = async () => {
+    try {
+      const data = await api.getApps();
+      setApps(data);
+      if (data.length > 0) {
+        setSelectedAppId(data[0].id);
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to load apps');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleDeleteVersion = (versionId: string) => {
-    toast.success(`Version ${versionId} deleted`);
+  const loadVersions = async () => {
+    setIsLoadingVersions(true);
+    try {
+      const data = await api.getAppVersions(selectedAppId);
+      setVersions(data);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to load versions');
+    } finally {
+      setIsLoadingVersions(false);
+    }
   };
+
+  const handleRollback = async (versionId: string) => {
+    try {
+      await api.rollbackApp(selectedAppId, versionId);
+      toast.success(`Rolling back to version ${versionId}...`);
+      loadVersions();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to rollback');
+    }
+  };
+
+  const handleDeleteVersion = async (versionId: string) => {
+    try {
+      await api.deleteVersion(selectedAppId, versionId);
+      toast.success(`Version ${versionId} deleted`);
+      loadVersions();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete version');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex h-[50vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (apps.length === 0) {
+    return (
+      <Layout>
+        <div className="flex h-[50vh] flex-col items-center justify-center text-center">
+          <GitCommit className="h-12 w-12 text-muted-foreground mb-4" />
+          <h2 className="text-xl font-semibold">No apps found</h2>
+          <p className="text-muted-foreground mt-2">Deploy an app first to manage versions</p>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -59,7 +144,7 @@ export default function Versions() {
               <SelectValue placeholder="Select app" />
             </SelectTrigger>
             <SelectContent>
-              {mockApps.map(app => (
+              {apps.map(app => (
                 <SelectItem key={app.id} value={app.id}>
                   {app.name}
                 </SelectItem>
@@ -68,7 +153,11 @@ export default function Versions() {
           </Select>
         </div>
 
-        {selectedApp && (
+        {isLoadingVersions ? (
+          <div className="flex h-[30vh] items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : selectedApp && (
           <>
             {/* Current Version Card */}
             <div className="mb-8 rounded-xl border border-primary/30 bg-card p-6 glow-primary">
@@ -82,7 +171,7 @@ export default function Versions() {
                     {selectedApp.currentVersion}
                   </h3>
                   <p className="mt-1 text-muted-foreground">
-                    {selectedApp.versions.find(v => v.isCurrent)?.commitMessage}
+                    {versions.find(v => v.isCurrent)?.commitMessage || 'No commit message'}
                   </p>
                 </div>
                 <div className="text-right">
@@ -101,124 +190,130 @@ export default function Versions() {
                 Versions are retained for 30 days. Click rollback to switch to a previous version.
               </p>
               
-              <div className="relative">
-                {/* Timeline line */}
-                <div className="absolute left-6 top-0 bottom-0 w-px bg-border" />
-                
-                {selectedApp.versions.map((version, index) => (
-                  <div 
-                    key={version.id}
-                    className={cn(
-                      'relative flex items-start gap-4 pb-6',
-                      'opacity-0 animate-slide-in',
-                      `stagger-${Math.min(index + 1, 5)}`
-                    )}
-                  >
-                    {/* Timeline dot */}
-                    <div className={cn(
-                      'relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-full',
-                      version.isCurrent 
-                        ? 'bg-primary text-primary-foreground' 
-                        : 'bg-secondary text-muted-foreground'
-                    )}>
-                      {version.isCurrent ? (
-                        <CheckCircle2 className="h-5 w-5" />
-                      ) : (
-                        <GitCommit className="h-5 w-5" />
+              {versions.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  No versions found
+                </div>
+              ) : (
+                <div className="relative">
+                  {/* Timeline line */}
+                  <div className="absolute left-6 top-0 bottom-0 w-px bg-border" />
+                  
+                  {versions.map((version, index) => (
+                    <div 
+                      key={version.id}
+                      className={cn(
+                        'relative flex items-start gap-4 pb-6',
+                        'opacity-0 animate-slide-in',
+                        `stagger-${Math.min(index + 1, 5)}`
                       )}
-                    </div>
+                    >
+                      {/* Timeline dot */}
+                      <div className={cn(
+                        'relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-full',
+                        version.isCurrent 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'bg-secondary text-muted-foreground'
+                      )}>
+                        {version.isCurrent ? (
+                          <CheckCircle2 className="h-5 w-5" />
+                        ) : (
+                          <GitCommit className="h-5 w-5" />
+                        )}
+                      </div>
 
-                    {/* Content */}
-                    <div className={cn(
-                      'flex-1 rounded-xl border p-4',
-                      version.isCurrent 
-                        ? 'border-primary/30 bg-primary/5' 
-                        : 'border-border bg-card hover:border-primary/20'
-                    )}>
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-mono font-semibold text-foreground">
-                              {version.timestamp}
-                            </h4>
-                            {version.isCurrent && (
-                              <span className="inline-flex items-center rounded-full bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary">
-                                Active
-                              </span>
+                      {/* Content */}
+                      <div className={cn(
+                        'flex-1 rounded-xl border p-4',
+                        version.isCurrent 
+                          ? 'border-primary/30 bg-primary/5' 
+                          : 'border-border bg-card hover:border-primary/20'
+                      )}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-mono font-semibold text-foreground">
+                                {version.timestamp}
+                              </h4>
+                              {version.isCurrent && (
+                                <span className="inline-flex items-center rounded-full bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary">
+                                  Active
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {version.commitMessage || 'No commit message'}
+                            </p>
+                            {version.commitHash && (
+                              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                <GitCommit className="h-3 w-3" />
+                                <span className="font-mono">{version.commitHash}</span>
+                              </div>
                             )}
                           </div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {version.commitMessage}
-                          </p>
-                          {version.commitHash && (
-                            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                              <GitCommit className="h-3 w-3" />
-                              <span className="font-mono">{version.commitHash}</span>
-                            </div>
-                          )}
-                        </div>
 
-                        <div className="flex items-center gap-2">
-                          {!version.isCurrent && (
-                            <>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button variant="outline" size="sm">
-                                    <RotateCcw className="h-4 w-4" />
-                                    Rollback
-                                  </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Confirm Rollback</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      This will switch the active version to <span className="font-mono">{version.timestamp}</span> and restart the PM2 process. The current version will remain available for future rollback.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => handleRollback(version.id)}>
-                                      Confirm Rollback
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
+                          <div className="flex items-center gap-2">
+                            {!version.isCurrent && (
+                              <>
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button variant="outline" size="sm">
+                                      <RotateCcw className="h-4 w-4" />
+                                      Rollback
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Confirm Rollback</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This will switch the active version to <span className="font-mono">{version.timestamp}</span> and restart the PM2 process. The current version will remain available for future rollback.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction onClick={() => handleRollback(version.id)}>
+                                        Confirm Rollback
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
 
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive">
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle className="flex items-center gap-2">
-                                      <AlertTriangle className="h-5 w-5 text-destructive" />
-                                      Delete Version
-                                    </AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      This will permanently delete the release files for version <span className="font-mono">{version.timestamp}</span>. This action cannot be undone.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction 
-                                      onClick={() => handleDeleteVersion(version.id)}
-                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                    >
-                                      Delete
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </>
-                          )}
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle className="flex items-center gap-2">
+                                        <AlertTriangle className="h-5 w-5 text-destructive" />
+                                        Delete Version
+                                      </AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This will permanently delete the release files for version <span className="font-mono">{version.timestamp}</span>. This action cannot be undone.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction 
+                                        onClick={() => handleDeleteVersion(version.id)}
+                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      >
+                                        Delete
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Retention Notice */}
