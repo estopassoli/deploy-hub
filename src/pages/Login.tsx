@@ -3,15 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Server, Lock, Mail, Eye, EyeOff } from 'lucide-react';
+import { Server, Lock, Mail, Eye, EyeOff, Key, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function Login() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, register } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({ email: '', password: '' });
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [formData, setFormData] = useState({ 
+    email: '', 
+    password: '', 
+    name: '',
+    secret: '' 
+  });
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -19,14 +25,24 @@ export default function Login() {
     setIsLoading(true);
     
     try {
-      await login(formData.email, formData.password);
-      toast.success('Bem-vindo!');
+      if (isRegisterMode) {
+        await register(formData.email, formData.password, formData.name, formData.secret);
+        toast.success('Conta criada com sucesso!');
+      } else {
+        await login(formData.email, formData.password);
+        toast.success('Bem-vindo!');
+      }
       navigate('/');
     } catch (error: any) {
-      toast.error(error.message || 'Credenciais inválidas');
+      toast.error(error.message || 'Erro ao processar solicitação');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const toggleMode = () => {
+    setIsRegisterMode(!isRegisterMode);
+    setFormData({ email: '', password: '', name: '', secret: '' });
   };
 
   return (
@@ -42,11 +58,30 @@ export default function Login() {
             <Server className="h-8 w-8 text-primary-foreground" />
           </div>
           <h1 className="text-3xl font-bold text-foreground">DeployHub</h1>
-          <p className="text-muted-foreground mt-2">Acesse seu painel DevOps</p>
+          <p className="text-muted-foreground mt-2">
+            {isRegisterMode ? 'Crie sua conta' : 'Acesse seu painel DevOps'}
+          </p>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {isRegisterMode && (
+              <div className="space-y-2">
+                <Label htmlFor="name">Nome</Label>
+                <div className="relative">
+                  <UserPlus className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="name"
+                    type="text"
+                    placeholder="Seu nome"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
@@ -75,6 +110,7 @@ export default function Login() {
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="pl-10 pr-10"
                   required
+                  minLength={isRegisterMode ? 6 : 1}
                 />
                 <button
                   type="button"
@@ -86,10 +122,47 @@ export default function Login() {
               </div>
             </div>
 
+            {isRegisterMode && (
+              <div className="space-y-2">
+                <Label htmlFor="secret">Secret de Registro</Label>
+                <div className="relative">
+                  <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="secret"
+                    type="password"
+                    placeholder="Digite o secret de autorização"
+                    value={formData.secret}
+                    onChange={(e) => setFormData({ ...formData, secret: e.target.value })}
+                    className="pl-10"
+                    required
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  O secret é necessário para criar novas contas
+                </p>
+              </div>
+            )}
+
             <Button type="submit" variant="gradient" className="w-full" size="lg" disabled={isLoading}>
-              {isLoading ? 'Entrando...' : 'Entrar'}
+              {isLoading 
+                ? (isRegisterMode ? 'Criando conta...' : 'Entrando...') 
+                : (isRegisterMode ? 'Criar Conta' : 'Entrar')
+              }
             </Button>
           </form>
+
+          <div className="mt-6 text-center">
+            <button
+              type="button"
+              onClick={toggleMode}
+              className="text-sm text-muted-foreground hover:text-primary transition-colors"
+            >
+              {isRegisterMode 
+                ? 'Já tem uma conta? Faça login' 
+                : 'Precisa de uma conta? Cadastre-se'
+              }
+            </button>
+          </div>
         </div>
 
         <div className="mt-6 text-center">

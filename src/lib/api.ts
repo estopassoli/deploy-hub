@@ -60,10 +60,10 @@ class ApiClient {
     return result;
   }
 
-  async register(email: string, password: string, name?: string) {
+  async register(email: string, password: string, name?: string, secret?: string) {
     const result = await this.request<{ access_token: string; user: any }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify({ email, password, name, secret }),
     });
     this.setToken(result.access_token);
     return result;

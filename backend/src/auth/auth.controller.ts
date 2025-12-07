@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Get, Request } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, Request, UnauthorizedException } from '@nestjs/common';
 import { IsEmail, IsString, IsOptional, MinLength } from 'class-validator';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
@@ -23,6 +23,9 @@ class RegisterDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @IsString()
+  secret: string;
 }
 
 @Controller('auth')
@@ -36,6 +39,12 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() dto: RegisterDto) {
+    const registrationSecret = process.env.REGISTRATION_SECRET || 'deployhub-secret-2024';
+    
+    if (dto.secret !== registrationSecret) {
+      throw new UnauthorizedException('Secret inválido');
+    }
+    
     return this.authService.register(dto.email, dto.password, dto.name);
   }
 
