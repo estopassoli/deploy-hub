@@ -15,7 +15,8 @@ export class WebhookController {
     @Req() req: RawBodyRequest<Request>,
     @Body() body: any,
   ) {
-    return this.webhookService.handleGitHubWebhook(appName, signature, event, body);
+    const rawBody = req.rawBody;
+    return this.webhookService.handleGitHubWebhook(appName, signature, event, body, rawBody);
   }
 
   @UseGuards(JwtAuthGuard)
