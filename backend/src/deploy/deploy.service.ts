@@ -23,7 +23,7 @@ export class DeployService {
     this.deployGateway.emitDeployLog(appName, message);
   }
 
-  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string }) {
+  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; envVars?: string }) {
     // Validate required fields
     if (!data.name || !data.repository || !data.port || !data.type) {
       throw new BadRequestException('Missing required fields: name, repository, port, type');
@@ -36,14 +36,18 @@ export class DeployService {
       app = await this.appsService.create(data as any);
     }
 
-    return this.executeDeploy(app);
+    // Pass extra deploy options
+    return this.executeDeploy(app, {
+      installCommand: data.installCommand,
+      envVars: data.envVars,
+    });
   }
 
   async redeploy(appId: string) {
     const app = await this.prisma.app.findUnique({ where: { id: appId } });
     if (!app) throw new BadRequestException('App não encontrado');
 
-    return this.executeDeploy(app);
+    return this.executeDeploy(app, {});
   }
 
   private async runCommand(command: string, cwd: string, appName: string): Promise<string> {
@@ -89,7 +93,7 @@ export class DeployService {
     });
   }
 
-  private async executeDeploy(app: any) {
+  private async executeDeploy(app: any, options: { installCommand?: string; envVars?: string } = {}) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
     const releaseDir = path.join(APPS_DIR, app.name, 'releases', timestamp);
     const currentLink = path.join(APPS_DIR, app.name, 'current');
@@ -135,9 +139,19 @@ export class DeployService {
         data: { commitHash: commitHash.trim(), commitMessage: commitMessage.trim() },
       });
 
+      // Write .env file if provided
+      if (options.envVars) {
+        this.log(app.name, '▶ Writing environment variables...');
+        const envPath = path.join(releaseDir, '.env');
+        await fs.promises.writeFile(envPath, options.envVars);
+        this.log(app.name, '✓ Environment file created');
+      }
+
       // Install dependencies
       this.log(app.name, '▶ Installing dependencies...');
-      await this.runCommand('npm ci --prefer-offline', releaseDir, app.name);
+      const installCmd = options.installCommand || 'npm ci --prefer-offline';
+      this.log(app.name, `  Command: ${installCmd}`);
+      await this.runCommand(installCmd, releaseDir, app.name);
       this.log(app.name, '✓ Dependencies installed');
 
       // Check for Prisma

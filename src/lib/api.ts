@@ -134,7 +134,7 @@ class ApiClient {
   }
 
   // Deploy
-  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string }) {
+  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; envVars?: string }) {
     return this.request<any>('/deploy', {
       method: 'POST',
       body: JSON.stringify(data),
