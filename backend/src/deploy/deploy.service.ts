@@ -1,11 +1,12 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { AppsService } from '../apps/apps.service';
-import { DeployGateway } from './deploy.gateway';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { promisify } from 'util';
+import { AppsService } from '../apps/apps.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { DeployGateway } from './deploy.gateway';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -16,7 +17,7 @@ export class DeployService {
     private prisma: PrismaService,
     private appsService: AppsService,
     private deployGateway: DeployGateway,
-  ) {}
+  ) { }
 
   // Store logs per deploy for persistence
   private deployLogs: Map<string, string[]> = new Map();
@@ -24,7 +25,7 @@ export class DeployService {
   private log(appName: string, message: string, deployId?: string) {
     console.log(`[${appName}] ${message}`);
     this.deployGateway.emitDeployLog(appName, message);
-    
+
     // Accumulate logs for persistence
     if (deployId) {
       if (!this.deployLogs.has(deployId)) {
@@ -53,7 +54,7 @@ export class DeployService {
 
     // Create app if not exists
     let app = await this.prisma.app.findUnique({ where: { name: data.name } });
-    
+
     if (!app) {
       app = await this.appsService.create(data as any);
     }
@@ -98,25 +99,25 @@ export class DeployService {
   }
 
   private async runCommand(
-    command: string, 
-    cwd: string, 
-    appName: string, 
+    command: string,
+    cwd: string,
+    appName: string,
     deployId?: string,
     extraEnv?: Record<string, string>
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       this.log(appName, `$ ${command}`, deployId);
-      
-      const proc = spawn(command, [], { 
-        cwd, 
+
+      const proc = spawn(command, [], {
+        cwd,
         shell: true,
-        env: { 
-          ...process.env, 
+        env: {
+          ...process.env,
           FORCE_COLOR: '0',
-          ...extraEnv 
+          ...extraEnv
         }
       });
-      
+
       let output = '';
       let errorOutput = '';
 
@@ -124,7 +125,7 @@ export class DeployService {
       proc.stdout.on('data', (data) => {
         const text = data.toString();
         output += text;
-        
+
         // Split by lines and send each one
         const lines = text.split('\n');
         lines.forEach((line: string) => {
@@ -138,7 +139,7 @@ export class DeployService {
       proc.stderr.on('data', (data) => {
         const text = data.toString();
         errorOutput += text;
-        
+
         // Split by lines and send each one
         const lines = text.split('\n');
         lines.forEach((line: string) => {
@@ -176,27 +177,27 @@ export class DeployService {
    */
   private parseEnvVars(envVars?: string): Record<string, string> {
     if (!envVars) return {};
-    
+
     const envObj: Record<string, string> = {};
     const lines = envVars.split('\n');
-    
+
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
-      
+
       const eqIndex = trimmed.indexOf('=');
       if (eqIndex > 0) {
         const key = trimmed.substring(0, eqIndex).trim();
         let value = trimmed.substring(eqIndex + 1).trim();
         // Remove quotes if present
-        if ((value.startsWith('"') && value.endsWith('"')) || 
-            (value.startsWith("'") && value.endsWith("'"))) {
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
           value = value.slice(1, -1);
         }
         envObj[key] = value;
       }
     }
-    
+
     return envObj;
   }
 
@@ -220,7 +221,7 @@ export class DeployService {
 
     this.log(app.name, '▶ Starting deploy...', deploy.id);
     this.log(app.name, `  Version: ${timestamp}`, deploy.id);
-    
+
     if (options.envVars) {
       this.log(app.name, `  Environment variables: ${Object.keys(envVarsObj).length} defined`, deploy.id);
     }
@@ -309,7 +310,7 @@ export class DeployService {
         try {
           await execAsync(`pm2 delete ${app.name}`);
           this.log(app.name, '  Stopped existing process', deploy.id);
-        } catch {}
+        } catch { /* empty */ }
 
         await execAsync(`pm2 start ${configPath}`);
         await execAsync('pm2 save');
@@ -337,7 +338,7 @@ export class DeployService {
         try {
           await execAsync('which certbot');
           this.log(app.name, '✓ Certbot is installed', deploy.id);
-          
+
           this.log(app.name, '▶ Generating SSL certificate with Certbot...', deploy.id);
           await this.runCommand(`sudo certbot --nginx -d ${app.domain} --non-interactive --agree-tos --email admin@${app.domain}`, '/tmp', app.name, deploy.id);
           this.log(app.name, `✓ SSL certificate generated for ${app.domain}`, deploy.id);
@@ -388,10 +389,10 @@ export class DeployService {
       return { success: true, version: timestamp, deploy };
     } catch (error) {
       const errorMessage = error.message || 'Unknown error';
-      
+
       this.log(app.name, '', deploy.id);
       this.log(app.name, `❌ Deploy failed: ${errorMessage}`, deploy.id);
-      
+
       // Persist all accumulated logs before marking as failed
       await this.persistLogs(deploy.id);
 
@@ -445,11 +446,11 @@ export class DeployService {
       where: { id: deployId },
       select: { id: true, version: true, status: true, logs: true, createdAt: true },
     });
-    
+
     if (!deploy) {
       throw new BadRequestException('Deploy não encontrado');
     }
-    
+
     return {
       id: deploy.id,
       version: deploy.version,
@@ -464,9 +465,9 @@ export class DeployService {
    * Tenta npm ci, se falhar por lock file desatualizado, usa npm install
    */
   private async installDependencies(
-    cwd: string, 
-    appName: string, 
-    customCommand?: string, 
+    cwd: string,
+    appName: string,
+    customCommand?: string,
     deployId?: string,
     envVars?: Record<string, string>
   ): Promise<void> {
@@ -479,7 +480,7 @@ export class DeployService {
 
     // Verifica se package-lock.json existe
     const hasLockFile = fs.existsSync(path.join(cwd, 'package-lock.json'));
-    
+
     if (!hasLockFile) {
       this.log(appName, '  ⚠️ No package-lock.json found, using npm install', deployId);
       this.log(appName, '  Command: npm install', deployId);
@@ -493,19 +494,19 @@ export class DeployService {
       await this.runCommand('npm ci --prefer-offline', cwd, appName, deployId, envVars);
     } catch (error) {
       const errorMsg = error.message || '';
-      
+
       // Detecta erro de lock file desatualizado
-      if (errorMsg.includes('EUSAGE') || 
-          errorMsg.includes('package.json and package-lock.json') ||
-          errorMsg.includes('Missing:') ||
-          errorMsg.includes('out of sync')) {
+      if (errorMsg.includes('EUSAGE') ||
+        errorMsg.includes('package.json and package-lock.json') ||
+        errorMsg.includes('Missing:') ||
+        errorMsg.includes('out of sync')) {
         this.log(appName, '', deployId);
         this.log(appName, '  🔧 Auto-diagnóstico: Lock file desatualizado detectado', deployId);
         this.log(appName, '  ⚡ Fallback: Usando npm install para sincronizar...', deployId);
         this.log(appName, '  Command: npm install', deployId);
-        
+
         await this.runCommand('npm install', cwd, appName, deployId, envVars);
-        
+
         this.log(appName, '  ✓ Dependências sincronizadas via npm install', deployId);
       } else {
         // Outro tipo de erro, repassa
@@ -524,7 +525,7 @@ export class DeployService {
       PORT: app.port,
     };
     const mergedEnv = { ...baseEnv, ...envVars };
-    
+
     // Convert env object to JS object string
     const envString = Object.entries(mergedEnv)
       .map(([key, value]) => {
@@ -540,7 +541,7 @@ export class DeployService {
       const parts = customStartCommand.split(' ');
       const script = parts[0];
       const args = parts.slice(1).join(' ');
-      
+
       return `
 module.exports = {
   apps: [{
@@ -603,9 +604,8 @@ ${envString}
   }]
 };
 `;
-};
-`;
-  }
+  };
+  // Move the following methods inside the DeployService class
 
   private async updateNginxConfig(app: any) {
     const config = app.type === 'vitejs'
@@ -614,20 +614,20 @@ ${envString}
 
     const configPath = `/etc/nginx/sites-available/${app.name}.conf`;
     const enabledPath = `/etc/nginx/sites-enabled/${app.name}.conf`;
-    
+
     // Write config to sites-available first
     const tempPath = `/tmp/${app.name}.nginx.conf`;
     await fs.promises.writeFile(tempPath, config);
     this.log(app.name, `  Writing config to ${configPath}`);
-    
+
     // Move to sites-available with sudo
     await execAsync(`sudo mv ${tempPath} ${configPath}`);
-    
+
     // Create symlink in sites-enabled
     await execAsync(`sudo rm -f ${enabledPath}`);
     await execAsync(`sudo ln -s ${configPath} ${enabledPath}`);
     this.log(app.name, `  Symlink created: ${enabledPath}`);
-    
+
     // Test and reload nginx
     await execAsync('sudo nginx -t');
     this.log(app.name, '  Nginx config test passed');
