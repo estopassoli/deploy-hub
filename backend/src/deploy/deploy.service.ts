@@ -23,7 +23,7 @@ export class DeployService {
     this.deployGateway.emitDeployLog(appName, message);
   }
 
-  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; envVars?: string }) {
+  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; envVars?: string; generateSSL?: boolean }) {
     // Validate required fields
     if (!data.name || !data.repository || !data.port || !data.type) {
       throw new BadRequestException('Missing required fields: name, repository, port, type');
@@ -40,6 +40,7 @@ export class DeployService {
     return this.executeDeploy(app, {
       installCommand: data.installCommand,
       envVars: data.envVars,
+      generateSSL: data.generateSSL,
     });
   }
 
@@ -114,7 +115,7 @@ export class DeployService {
     });
   }
 
-  private async executeDeploy(app: any, options: { installCommand?: string; envVars?: string } = {}) {
+  private async executeDeploy(app: any, options: { installCommand?: string; envVars?: string; generateSSL?: boolean } = {}) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
     const releaseDir = path.join(APPS_DIR, app.name, 'releases', timestamp);
     const currentLink = path.join(APPS_DIR, app.name, 'current');
@@ -225,6 +226,20 @@ export class DeployService {
       this.log(app.name, '▶ Configuring Nginx...');
       await this.updateNginxConfig(app);
       this.log(app.name, `✓ Nginx configured${app.domain ? ` for ${app.domain}` : ''}`);
+
+      // Generate SSL certificate with Certbot if requested
+      if (options.generateSSL && app.domain) {
+        this.log(app.name, '▶ Generating SSL certificate with Certbot...');
+        try {
+          await this.runCommand(`sudo certbot --nginx -d ${app.domain} --non-interactive --agree-tos --email admin@${app.domain}`, '/tmp', app.name);
+          this.log(app.name, `✓ SSL certificate generated for ${app.domain}`);
+        } catch (e) {
+          this.log(app.name, `  ⚠️ Failed to generate SSL: ${e.message}`);
+          this.log(app.name, '  You can manually run: sudo certbot --nginx -d ' + app.domain);
+        }
+      } else if (options.generateSSL && !app.domain) {
+        this.log(app.name, '  ⚠️ SSL generation skipped - no domain configured');
+      }
 
       // Mark deploy as success
       await this.prisma.deploy.updateMany({ where: { appId: app.id }, data: { isCurrent: false } });
