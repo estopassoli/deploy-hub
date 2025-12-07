@@ -89,19 +89,22 @@ export class AppsService {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
-    const updateData: any = {};
-    if (data.domain !== undefined) updateData.domain = data.domain;
-    if (data.branch !== undefined) updateData.branch = data.branch;
-    if (data.envVars !== undefined) updateData.envVars = data.envVars;
-    if (data.installCommand !== undefined) updateData.installCommand = data.installCommand;
-    if (data.buildCommand !== undefined) updateData.buildCommand = data.buildCommand;
-    if (data.migrateCommand !== undefined) updateData.migrateCommand = data.migrateCommand;
-    if (data.startCommand !== undefined) updateData.startCommand = data.startCommand;
+    console.log('[AppsService] Update received:', { id, data });
 
     const updated = await this.prisma.app.update({
       where: { id },
-      data: updateData,
+      data: {
+        domain: data.domain !== undefined ? data.domain : undefined,
+        branch: data.branch !== undefined ? data.branch : undefined,
+        envVars: data.envVars !== undefined ? (data.envVars || null) : undefined,
+        installCommand: data.installCommand !== undefined ? (data.installCommand || null) : undefined,
+        buildCommand: data.buildCommand !== undefined ? (data.buildCommand || null) : undefined,
+        migrateCommand: data.migrateCommand !== undefined ? (data.migrateCommand || null) : undefined,
+        startCommand: data.startCommand !== undefined ? (data.startCommand || null) : undefined,
+      },
     });
+
+    console.log('[AppsService] Update result:', updated);
 
     // Update Nginx config if domain changed
     if (data.domain && data.domain !== app.domain) {
