@@ -300,7 +300,15 @@ export class DeployService {
         await execAsync('pm2 save');
         this.log(app.name, `✓ PM2 process started on port ${app.port}`, deploy.id);
       } else {
-        this.log(app.name, '  Static app - no PM2 process needed', deploy.id);
+        // For Vite.js static apps, copy dist to /var/www/{app_name}
+        this.log(app.name, '▶ Copying dist to /var/www...', deploy.id);
+        const wwwDir = `/var/www/${app.name}`;
+        await execAsync(`sudo mkdir -p ${wwwDir}`);
+        await execAsync(`sudo rm -rf ${wwwDir}/*`);
+        await execAsync(`sudo cp -r ${currentLink}/dist/* ${wwwDir}/`);
+        await execAsync(`sudo chown -R www-data:www-data ${wwwDir}`);
+        await execAsync(`sudo chmod -R 755 ${wwwDir}`);
+        this.log(app.name, `✓ Static files copied to ${wwwDir}`, deploy.id);
       }
 
       // Update Nginx
@@ -604,10 +612,11 @@ ${envString}
   }
 
   private generateStaticNginxConfig(app: any): string {
+    // Use /var/www/{app_name} for static files - better permissions for Nginx
     return `server {
     listen 80;
     server_name ${app.domain || '_'};
-    root ${APPS_DIR}/${app.name}/current/dist;
+    root /var/www/${app.name};
     index index.html;
 
     location / {

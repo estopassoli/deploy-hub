@@ -115,16 +115,33 @@ export class AppsService {
     // Stop PM2 process
     try {
       await execAsync(`pm2 delete ${app.name}`);
+      await execAsync('pm2 save');
     } catch (e) {
       // Process might not exist
     }
 
     // Remove Nginx config
     try {
-      await execAsync(`rm -f /etc/nginx/sites-enabled/${app.name}.conf`);
-      await execAsync('nginx -s reload');
+      await execAsync(`sudo rm -f /etc/nginx/sites-available/${app.name}.conf`);
+      await execAsync(`sudo rm -f /etc/nginx/sites-enabled/${app.name}.conf`);
+      await execAsync('sudo systemctl reload nginx');
     } catch (e) {
       // Config might not exist
+    }
+
+    // Remove app directory from ~/apps
+    try {
+      const appDir = path.join(APPS_DIR, app.name);
+      await execAsync(`rm -rf ${appDir}`);
+    } catch (e) {
+      // Directory might not exist
+    }
+
+    // Remove /var/www/{app_name} directory (for static apps)
+    try {
+      await execAsync(`sudo rm -rf /var/www/${app.name}`);
+    } catch (e) {
+      // Directory might not exist
     }
 
     await this.prisma.app.delete({ where: { id } });
@@ -282,11 +299,12 @@ server {
   }
 
   private generateStaticNginxConfig(app: any): string {
+    // Use /var/www/{app_name} for static files - better permissions for Nginx
     return `
 server {
     listen 80;
     server_name ${app.domain || app.name + '.localhost'};
-    root ${APPS_DIR}/${app.name}/current/dist;
+    root /var/www/${app.name};
     index index.html;
 
     location / {
@@ -297,6 +315,9 @@ server {
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
 }
 `;
   }
