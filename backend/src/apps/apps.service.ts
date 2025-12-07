@@ -89,22 +89,27 @@ export class AppsService {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
-    console.log('[AppsService] Update received:', { id, data });
+    console.log('[AppsService] Update received:', JSON.stringify({ id, data }, null, 2));
+
+    // Build update data - only include fields that were explicitly sent
+    const updateData: Record<string, any> = {};
+    
+    if (data.domain !== undefined) updateData.domain = data.domain || null;
+    if (data.branch !== undefined) updateData.branch = data.branch || null;
+    if (data.envVars !== undefined) updateData.envVars = data.envVars || null;
+    if (data.installCommand !== undefined) updateData.installCommand = data.installCommand || null;
+    if (data.buildCommand !== undefined) updateData.buildCommand = data.buildCommand || null;
+    if (data.migrateCommand !== undefined) updateData.migrateCommand = data.migrateCommand || null;
+    if (data.startCommand !== undefined) updateData.startCommand = data.startCommand || null;
+
+    console.log('[AppsService] Update data to save:', JSON.stringify(updateData, null, 2));
 
     const updated = await this.prisma.app.update({
       where: { id },
-      data: {
-        domain: data.domain !== undefined ? data.domain : undefined,
-        branch: data.branch !== undefined ? data.branch : undefined,
-        envVars: data.envVars !== undefined ? (data.envVars || null) : undefined,
-        installCommand: data.installCommand !== undefined ? (data.installCommand || null) : undefined,
-        buildCommand: data.buildCommand !== undefined ? (data.buildCommand || null) : undefined,
-        migrateCommand: data.migrateCommand !== undefined ? (data.migrateCommand || null) : undefined,
-        startCommand: data.startCommand !== undefined ? (data.startCommand || null) : undefined,
-      },
+      data: updateData,
     });
 
-    console.log('[AppsService] Update result:', updated);
+    console.log('[AppsService] Update result:', JSON.stringify(updated, null, 2));
 
     // Update Nginx config if domain changed
     if (data.domain && data.domain !== app.domain) {
