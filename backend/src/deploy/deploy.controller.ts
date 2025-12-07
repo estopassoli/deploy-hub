@@ -1,5 +1,5 @@
 import { Controller, Post, Body, Param, UseGuards, Get } from '@nestjs/common';
-import { IsString, IsNumber, IsOptional, IsIn } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsIn, IsBoolean } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { DeployService } from './deploy.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -34,6 +34,11 @@ class DeployDto {
   @IsOptional()
   @IsString()
   envVars?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true')
+  generateSSL?: boolean;
 }
 
 @Controller('deploy')

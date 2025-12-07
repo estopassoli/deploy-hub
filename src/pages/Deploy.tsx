@@ -19,7 +19,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  XCircle
+  XCircle,
+  ShieldCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -52,6 +53,7 @@ export default function Deploy() {
     branch: 'main',
     installCommand: '',
     envVars: '',
+    generateSSL: false,
   });
   const [portError, setPortError] = useState('');
   const [portChecking, setPortChecking] = useState(false);
@@ -141,6 +143,7 @@ export default function Deploy() {
         branch: formData.branch,
         installCommand: formData.installCommand || undefined,
         envVars: formData.envVars || undefined,
+        generateSSL: formData.generateSSL,
       });
 
       setDeployResult(result);
@@ -186,6 +189,7 @@ export default function Deploy() {
       branch: 'main',
       installCommand: '',
       envVars: '',
+      generateSSL: false,
     });
     setDeployLogs([]);
     setDeployResult(null);
@@ -391,6 +395,25 @@ export default function Deploy() {
                 <p className="text-xs text-muted-foreground">
                   One variable per line in KEY=value format. Will be saved as .env
                 </p>
+              </div>
+
+              <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-4">
+                <input
+                  type="checkbox"
+                  id="generateSSL"
+                  checked={formData.generateSSL}
+                  onChange={(e) => setFormData({ ...formData, generateSSL: e.target.checked })}
+                  className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
+                />
+                <div className="flex-1">
+                  <Label htmlFor="generateSSL" className="flex items-center gap-2 cursor-pointer">
+                    <ShieldCheck className="h-4 w-4 text-success" />
+                    Generate SSL Certificate (Certbot)
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Automatically generate a free SSL certificate using Let's Encrypt. Requires a valid domain.
+                  </p>
+                </div>
               </div>
             </div>
 
