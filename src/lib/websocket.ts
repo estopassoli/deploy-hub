@@ -64,4 +64,10 @@ class WebSocketClient {
 }
 
 export const wsClient = new WebSocketClient();
+export const getSocket = () => {
+  if (!wsClient['socket']) {
+    wsClient.connect();
+  }
+  return wsClient['socket']!;
+};
 export default wsClient;
