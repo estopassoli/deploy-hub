@@ -376,10 +376,34 @@ export class DeployService {
   }
 
   private generatePM2Config(app: any, currentPath: string): string {
-    // Use npm run start for all app types - more reliable than direct script paths
     const isSupported = ['nestjs', 'nextjs'].includes(app.type);
     if (!isSupported) return '';
 
+    // Para Next.js, usa comando direto para garantir que a porta configurada prevalece
+    // sobre qualquer --port hardcoded no package.json
+    if (app.type === 'nextjs') {
+      return `
+module.exports = {
+  apps: [{
+    name: '${app.name}',
+    cwd: '${currentPath}',
+    script: 'node_modules/.bin/next',
+    args: 'start --port ${app.port}',
+    interpreter: 'none',
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+      NODE_ENV: 'production',
+      PORT: ${app.port}
+    }
+  }]
+};
+`;
+    }
+
+    // Para NestJS e outros, usa npm run start
     return `
 module.exports = {
   apps: [{
