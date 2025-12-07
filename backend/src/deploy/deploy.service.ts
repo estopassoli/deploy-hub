@@ -1,7 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppsService } from '../apps/apps.service';
-import { exec } from 'child_process';
+import { DeployGateway } from './deploy.gateway';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,7 +15,13 @@ export class DeployService {
   constructor(
     private prisma: PrismaService,
     private appsService: AppsService,
+    private deployGateway: DeployGateway,
   ) {}
+
+  private log(appName: string, message: string) {
+    console.log(`[${appName}] ${message}`);
+    this.deployGateway.emitDeployLog(appName, message);
+  }
 
   async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string }) {
     // Create app if not exists
@@ -34,10 +41,56 @@ export class DeployService {
     return this.executeDeploy(app);
   }
 
+  private async runCommand(command: string, cwd: string, appName: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const [cmd, ...args] = command.split(' ');
+      const proc = spawn(cmd, args, { cwd, shell: true });
+      
+      let output = '';
+      let errorOutput = '';
+
+      proc.stdout.on('data', (data) => {
+        const line = data.toString().trim();
+        if (line) {
+          output += line + '\n';
+          // Send first few meaningful lines
+          const lines = line.split('\n').slice(0, 3);
+          lines.forEach((l: string) => {
+            if (l.trim()) this.log(appName, `  ${l.trim().substring(0, 100)}`);
+          });
+        }
+      });
+
+      proc.stderr.on('data', (data) => {
+        const line = data.toString().trim();
+        if (line) {
+          errorOutput += line + '\n';
+          // Only log important errors
+          if (line.toLowerCase().includes('error') || line.toLowerCase().includes('warn')) {
+            this.log(appName, `  ⚠ ${line.substring(0, 100)}`);
+          }
+        }
+      });
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          resolve(output);
+        } else {
+          reject(new Error(errorOutput || `Command failed with code ${code}`));
+        }
+      });
+
+      proc.on('error', reject);
+    });
+  }
+
   private async executeDeploy(app: any) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
     const releaseDir = path.join(APPS_DIR, app.name, 'releases', timestamp);
     const currentLink = path.join(APPS_DIR, app.name, 'current');
+
+    this.log(app.name, '▶ Starting deploy...');
+    this.log(app.name, `  Version: ${timestamp}`);
 
     // Create deploy record
     const deploy = await this.prisma.deploy.create({
@@ -56,12 +109,21 @@ export class DeployService {
     });
 
     try {
+      // Ensure apps directory exists
+      await fs.promises.mkdir(path.join(APPS_DIR, app.name, 'releases'), { recursive: true });
+
       // Clone repository
+      this.log(app.name, '▶ Cloning repository...');
+      this.log(app.name, `  ${app.repository}`);
+      this.log(app.name, `  Branch: ${app.branch}`);
       await execAsync(`git clone --depth 1 --branch ${app.branch} ${app.repository} ${releaseDir}`);
+      this.log(app.name, '✓ Repository cloned');
 
       // Get commit info
       const { stdout: commitHash } = await execAsync(`cd ${releaseDir} && git rev-parse --short HEAD`);
       const { stdout: commitMessage } = await execAsync(`cd ${releaseDir} && git log -1 --pretty=%s`);
+
+      this.log(app.name, `  Commit: ${commitHash.trim()} - ${commitMessage.trim().substring(0, 50)}`);
 
       await this.prisma.deploy.update({
         where: { id: deploy.id },
@@ -69,42 +131,60 @@ export class DeployService {
       });
 
       // Install dependencies
-      await execAsync(`cd ${releaseDir} && npm ci`);
+      this.log(app.name, '▶ Installing dependencies...');
+      await this.runCommand('npm ci --prefer-offline', releaseDir, app.name);
+      this.log(app.name, '✓ Dependencies installed');
 
       // Check for Prisma
       const hasPrisma = fs.existsSync(path.join(releaseDir, 'prisma', 'schema.prisma'));
       if (hasPrisma) {
-        await execAsync(`cd ${releaseDir} && npx prisma generate`);
+        this.log(app.name, '▶ Generating Prisma client...');
+        await this.runCommand('npx prisma generate', releaseDir, app.name);
+        this.log(app.name, '✓ Prisma client generated');
+
+        // Run migrations if available
+        this.log(app.name, '▶ Running Prisma migrations...');
+        try {
+          await this.runCommand('npx prisma migrate deploy', releaseDir, app.name);
+          this.log(app.name, '✓ Migrations applied');
+        } catch (e) {
+          this.log(app.name, '  ⚠ No migrations to apply or error');
+        }
       }
 
       // Build based on type
-      if (app.type === 'nestjs') {
-        await execAsync(`cd ${releaseDir} && npm run build`);
-      } else if (app.type === 'nextjs') {
-        await execAsync(`cd ${releaseDir} && npm run build`);
-      } else if (app.type === 'vitejs') {
-        await execAsync(`cd ${releaseDir} && npm run build`);
-      }
+      this.log(app.name, `▶ Building ${app.type} application...`);
+      await this.runCommand('npm run build', releaseDir, app.name);
+      this.log(app.name, '✓ Build completed');
 
       // Update symlink
+      this.log(app.name, '▶ Updating symlink...');
       await execAsync(`rm -f ${currentLink} && ln -s ${releaseDir} ${currentLink}`);
+      this.log(app.name, `✓ ${currentLink} → ${releaseDir}`);
 
       // Start/restart PM2 (not for static)
       if (app.type !== 'vitejs') {
+        this.log(app.name, '▶ Starting PM2 process...');
         const pm2Config = this.generatePM2Config(app, currentLink);
         const configPath = path.join(APPS_DIR, app.name, 'ecosystem.config.js');
         await fs.promises.writeFile(configPath, pm2Config);
 
         try {
           await execAsync(`pm2 delete ${app.name}`);
+          this.log(app.name, '  Stopped existing process');
         } catch {}
 
         await execAsync(`pm2 start ${configPath}`);
         await execAsync('pm2 save');
+        this.log(app.name, `✓ PM2 process started on port ${app.port}`);
+      } else {
+        this.log(app.name, '  Static app - no PM2 process needed');
       }
 
       // Update Nginx
+      this.log(app.name, '▶ Configuring Nginx...');
       await this.updateNginxConfig(app);
+      this.log(app.name, `✓ Nginx configured${app.domain ? ` for ${app.domain}` : ''}`);
 
       // Mark deploy as success
       await this.prisma.deploy.updateMany({ where: { appId: app.id }, data: { isCurrent: false } });
@@ -128,12 +208,21 @@ export class DeployService {
         },
       });
 
+      this.log(app.name, '');
+      this.log(app.name, '🚀 Deploy completed successfully!');
+      this.deployGateway.emitDeployComplete(app.name, true, { version: timestamp, deploy });
+
       return { success: true, version: timestamp, deploy };
     } catch (error) {
+      const errorMessage = error.message || 'Unknown error';
+      
+      this.log(app.name, '');
+      this.log(app.name, `❌ Deploy failed: ${errorMessage}`);
+      
       // Mark deploy as failed
       await this.prisma.deploy.update({
         where: { id: deploy.id },
-        data: { status: 'failed', logs: error.message },
+        data: { status: 'failed', logs: errorMessage },
       });
 
       await this.prisma.app.update({
@@ -144,13 +233,15 @@ export class DeployService {
       await this.prisma.systemLog.create({
         data: {
           level: 'error',
-          message: `Deploy falhou: ${app.name} - ${error.message}`,
+          message: `Deploy falhou: ${app.name} - ${errorMessage}`,
           source: 'deploy',
           appId: app.id,
         },
       });
 
-      throw new BadRequestException(`Deploy falhou: ${error.message}`);
+      this.deployGateway.emitDeployComplete(app.name, false, { error: errorMessage });
+
+      throw new BadRequestException(`Deploy falhou: ${errorMessage}`);
     }
   }
 

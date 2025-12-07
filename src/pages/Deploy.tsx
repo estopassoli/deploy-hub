@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,14 +18,30 @@ import {
   Globe, 
   AlertCircle,
   CheckCircle2,
-  Loader2
+  Loader2,
+  XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import api from '@/lib/api';
+import { getSocket } from '@/lib/websocket';
 
-type DeployStep = 'config' | 'deploying' | 'complete';
+type DeployStep = 'config' | 'deploying' | 'complete' | 'error';
+
+interface DeployResult {
+  success: boolean;
+  version: string;
+  deploy: {
+    id: string;
+    appId: string;
+    version: string;
+    path: string;
+    status: string;
+  };
+}
 
 export default function Deploy() {
+  const navigate = useNavigate();
   const [step, setStep] = useState<DeployStep>('config');
   const [formData, setFormData] = useState({
     repository: '',
@@ -35,70 +52,123 @@ export default function Deploy() {
     branch: 'main',
   });
   const [portError, setPortError] = useState('');
+  const [portChecking, setPortChecking] = useState(false);
   const [deployLogs, setDeployLogs] = useState<string[]>([]);
+  const [deployResult, setDeployResult] = useState<DeployResult | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
-  const usedPorts = [3000, 3001, 3002, 3003, 8080];
+  // Auto-scroll logs
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [deployLogs]);
 
-  const handlePortChange = (value: string) => {
-    const port = parseInt(value);
-    if (usedPorts.includes(port)) {
-      setPortError(`Port ${port} is already in use. Try another.`);
-    } else {
-      setPortError('');
-    }
+  // Listen for deploy logs via WebSocket
+  useEffect(() => {
+    const socket = getSocket();
+    
+    const handleDeployLog = (data: { appName: string; message: string }) => {
+      if (data.appName === formData.name) {
+        setDeployLogs(prev => [...prev, data.message]);
+      }
+    };
+
+    socket.on('deploy:log', handleDeployLog);
+
+    return () => {
+      socket.off('deploy:log', handleDeployLog);
+    };
+  }, [formData.name]);
+
+  const handlePortChange = async (value: string) => {
     setFormData({ ...formData, port: value });
+    setPortError('');
+
+    if (!value || isNaN(parseInt(value))) return;
+
+    const port = parseInt(value);
+    
+    // Basic validation
+    if (port < 1024) {
+      setPortError('Ports below 1024 are reserved for system services');
+      return;
+    }
+    
+    if (port === 10000 || port === 10001) {
+      setPortError('This port is used by DeployHub');
+      return;
+    }
+
+    // Check with backend
+    setPortChecking(true);
+    try {
+      const result = await api.checkPort(port);
+      if (!result.available) {
+        if (result.usedBy) {
+          setPortError(`Port ${port} is used by ${result.usedBy}`);
+        } else if (result.isSystemPort) {
+          setPortError(`Port ${port} is a system reserved port`);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking port:', error);
+    } finally {
+      setPortChecking(false);
+    }
   };
 
-  const simulateDeploy = () => {
+  const handleDeploy = async () => {
     setStep('deploying');
-    const logs = [
-      '▶ Cloning repository...',
-      '✓ Repository cloned successfully',
-      '▶ Installing dependencies...',
-      '  npm install',
-      '✓ Dependencies installed (234 packages)',
-      '▶ Detecting Prisma...',
-      '  Found prisma/schema.prisma',
-      '▶ Running prisma generate...',
-      '✓ Prisma client generated',
-      '▶ Building application...',
-      '  npm run build',
-      '✓ Build completed successfully',
-      '▶ Creating release directory...',
-      '  ~/apps/' + formData.name + '/releases/2025-12-07_10-45-00',
-      '✓ Release directory created',
-      '▶ Updating symlink...',
-      '  ~/apps/' + formData.name + '/current → releases/2025-12-07_10-45-00',
-      '✓ Symlink updated',
-      '▶ Starting PM2 process...',
-      '  pm2 start ecosystem.config.js --name ' + formData.name,
-      '✓ PM2 process started',
-      '▶ Configuring Nginx...',
-      '  Creating proxy for ' + formData.domain + ' → localhost:' + formData.port,
-      '✓ Nginx configured and reloaded',
-      '',
-      '🚀 Deploy completed successfully!',
-    ];
+    setDeployLogs([
+      '▶ Starting deploy process...',
+      `  Repository: ${formData.repository}`,
+      `  App: ${formData.name}`,
+      `  Type: ${formData.type}`,
+      `  Port: ${formData.port}`,
+      `  Branch: ${formData.branch}`,
+      ''
+    ]);
 
-    let index = 0;
-    const interval = setInterval(() => {
-      if (index < logs.length) {
-        setDeployLogs(prev => [...prev, logs[index]]);
-        index++;
-      } else {
-        clearInterval(interval);
-        setTimeout(() => {
-          setStep('complete');
-          toast.success('Deploy completed successfully!');
-        }, 500);
-      }
-    }, 300);
+    try {
+      const result = await api.deploy({
+        repository: formData.repository,
+        name: formData.name,
+        port: parseInt(formData.port),
+        domain: formData.domain || undefined,
+        type: formData.type as 'nestjs' | 'nextjs' | 'vitejs',
+        branch: formData.branch,
+      });
+
+      setDeployResult(result);
+      setDeployLogs(prev => [
+        ...prev,
+        '',
+        '🚀 Deploy completed successfully!',
+        `  Version: ${result.version}`,
+        `  Path: ${result.deploy.path}`
+      ]);
+      setStep('complete');
+      toast.success('Deploy completed successfully!');
+    } catch (error: any) {
+      setErrorMessage(error.message || 'Deploy failed');
+      setDeployLogs(prev => [
+        ...prev,
+        '',
+        `❌ Deploy failed: ${error.message}`
+      ]);
+      setStep('error');
+      toast.error(error.message || 'Deploy failed');
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (portError) return;
-    simulateDeploy();
+    if (portError || portChecking) return;
+    if (!formData.type) {
+      toast.error('Please select an app type');
+      return;
+    }
+    handleDeploy();
   };
 
   const resetForm = () => {
@@ -112,6 +182,8 @@ export default function Deploy() {
       branch: 'main',
     });
     setDeployLogs([]);
+    setDeployResult(null);
+    setErrorMessage('');
   };
 
   return (
@@ -128,17 +200,20 @@ export default function Deploy() {
         {/* Steps Indicator */}
         <div className="mb-8 flex items-center gap-4">
           {['Configure', 'Deploy', 'Complete'].map((label, index) => {
-            const isActive = index === ['config', 'deploying', 'complete'].indexOf(step);
-            const isComplete = ['config', 'deploying', 'complete'].indexOf(step) > index;
+            const stepIndex = step === 'error' ? 1 : ['config', 'deploying', 'complete'].indexOf(step);
+            const isActive = index === stepIndex;
+            const isComplete = stepIndex > index;
+            const isError = step === 'error' && index === 1;
             return (
               <div key={label} className="flex items-center gap-2">
                 <div className={cn(
                   'flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-all',
-                  isActive && 'bg-primary text-primary-foreground',
+                  isActive && !isError && 'bg-primary text-primary-foreground',
+                  isError && 'bg-destructive text-destructive-foreground',
                   isComplete && 'bg-success text-success-foreground',
-                  !isActive && !isComplete && 'bg-secondary text-muted-foreground'
+                  !isActive && !isComplete && !isError && 'bg-secondary text-muted-foreground'
                 )}>
-                  {isComplete ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
+                  {isComplete ? <CheckCircle2 className="h-4 w-4" /> : isError ? <XCircle className="h-4 w-4" /> : index + 1}
                 </div>
                 <span className={cn(
                   'text-sm font-medium',
@@ -149,7 +224,7 @@ export default function Deploy() {
                 {index < 2 && (
                   <div className={cn(
                     'h-px w-12',
-                    isComplete ? 'bg-success' : 'bg-border'
+                    isComplete ? 'bg-success' : isError && index === 1 ? 'bg-destructive' : 'bg-border'
                   )} />
                 )}
               </div>
@@ -174,6 +249,9 @@ export default function Deploy() {
                   required
                   className="font-mono"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Make sure the server has SSH access to this repository
+                </p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -207,15 +285,20 @@ export default function Deploy() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="port">Port</Label>
-                  <Input
-                    id="port"
-                    type="number"
-                    placeholder="3000"
-                    value={formData.port}
-                    onChange={(e) => handlePortChange(e.target.value)}
-                    required
-                    className={cn('font-mono', portError && 'border-destructive')}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="port"
+                      type="number"
+                      placeholder="3000"
+                      value={formData.port}
+                      onChange={(e) => handlePortChange(e.target.value)}
+                      required
+                      className={cn('font-mono pr-8', portError && 'border-destructive')}
+                    />
+                    {portChecking && (
+                      <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                    )}
+                  </div>
                   {portError && (
                     <p className="flex items-center gap-1 text-sm text-destructive">
                       <AlertCircle className="h-3 w-3" />
@@ -227,14 +310,13 @@ export default function Deploy() {
                 <div className="space-y-2">
                   <Label htmlFor="domain" className="flex items-center gap-2">
                     <Globe className="h-4 w-4" />
-                    Domain
+                    Domain (optional)
                   </Label>
                   <Input
                     id="domain"
                     placeholder="app.example.com"
                     value={formData.domain}
                     onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
-                    required
                   />
                 </div>
               </div>
@@ -244,7 +326,6 @@ export default function Deploy() {
                 <Select
                   value={formData.type}
                   onValueChange={(value) => setFormData({ ...formData, type: value })}
-                  required
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select app type" />
@@ -253,19 +334,19 @@ export default function Deploy() {
                     <SelectItem value="nextjs">
                       <div className="flex items-center gap-2">
                         <div className="h-3 w-3 rounded-sm bg-foreground" />
-                        Next.js
+                        Next.js (SSR)
                       </div>
                     </SelectItem>
                     <SelectItem value="nestjs">
                       <div className="flex items-center gap-2">
                         <div className="h-3 w-3 rounded-sm bg-destructive" />
-                        NestJS
+                        NestJS (API)
                       </div>
                     </SelectItem>
                     <SelectItem value="vitejs">
                       <div className="flex items-center gap-2">
                         <div className="h-3 w-3 rounded-sm bg-purple-500" />
-                        Vite.js (Static)
+                        Vite.js (Static SPA)
                       </div>
                     </SelectItem>
                   </SelectContent>
@@ -274,10 +355,10 @@ export default function Deploy() {
             </div>
 
             <div className="flex justify-end gap-4">
-              <Button type="button" variant="outline" onClick={resetForm}>
+              <Button type="button" variant="outline" onClick={() => navigate('/')}>
                 Cancel
               </Button>
-              <Button type="submit" variant="gradient" disabled={!!portError}>
+              <Button type="submit" variant="gradient" disabled={!!portError || portChecking || !formData.type}>
                 <Rocket className="h-4 w-4" />
                 Start Deploy
               </Button>
@@ -286,12 +367,18 @@ export default function Deploy() {
         )}
 
         {/* Deploying */}
-        {step === 'deploying' && (
+        {(step === 'deploying' || step === 'error') && (
           <div className="space-y-4">
             <div className="rounded-xl border border-border bg-card overflow-hidden">
               <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                <span className="text-sm font-medium">Deploying {formData.name}...</span>
+                {step === 'deploying' ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                ) : (
+                  <XCircle className="h-4 w-4 text-destructive" />
+                )}
+                <span className="text-sm font-medium">
+                  {step === 'deploying' ? `Deploying ${formData.name}...` : `Deploy failed: ${formData.name}`}
+                </span>
               </div>
               <div className="h-[400px] overflow-auto bg-background p-4 font-mono text-sm terminal-scroll">
                 {deployLogs.map((log, index) => (
@@ -302,14 +389,27 @@ export default function Deploy() {
                       log?.startsWith('✓') && 'text-success',
                       log?.startsWith('▶') && 'text-primary',
                       log?.startsWith('🚀') && 'text-primary font-bold',
+                      log?.startsWith('❌') && 'text-destructive font-bold',
                       log?.startsWith('  ') && 'text-muted-foreground pl-4'
                     )}
                   >
                     {log || '\u00A0'}
                   </div>
                 ))}
+                <div ref={logsEndRef} />
               </div>
             </div>
+
+            {step === 'error' && (
+              <div className="flex justify-end gap-4">
+                <Button variant="outline" onClick={resetForm}>
+                  Try Again
+                </Button>
+                <Button variant="default" onClick={() => navigate('/')}>
+                  Go to Dashboard
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -322,15 +422,19 @@ export default function Deploy() {
               </div>
               <h2 className="text-2xl font-bold text-foreground">Deploy Successful!</h2>
               <p className="mt-2 text-muted-foreground">
-                Your application is now live at{' '}
-                <a 
-                  href={`https://${formData.domain}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline"
-                >
-                  {formData.domain}
-                </a>
+                Your application is now running
+                {formData.domain && (
+                  <> at{' '}
+                    <a 
+                      href={`https://${formData.domain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      {formData.domain}
+                    </a>
+                  </>
+                )}
               </p>
             </div>
 
@@ -345,18 +449,28 @@ export default function Deploy() {
                   <dt className="text-muted-foreground">Port</dt>
                   <dd className="font-mono text-foreground">{formData.port}</dd>
                 </div>
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">Domain</dt>
-                  <dd className="font-mono text-foreground">{formData.domain}</dd>
-                </div>
+                {formData.domain && (
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Domain</dt>
+                    <dd className="font-mono text-foreground">{formData.domain}</dd>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Type</dt>
                   <dd className="text-foreground">{formData.type}</dd>
                 </div>
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">Path</dt>
-                  <dd className="font-mono text-foreground">~/apps/{formData.name}/current</dd>
-                </div>
+                {deployResult && (
+                  <>
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Version</dt>
+                      <dd className="font-mono text-foreground">{deployResult.version}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Path</dt>
+                      <dd className="font-mono text-foreground text-xs">{deployResult.deploy.path}</dd>
+                    </div>
+                  </>
+                )}
               </dl>
             </div>
 
@@ -364,8 +478,8 @@ export default function Deploy() {
               <Button variant="outline" onClick={resetForm}>
                 Deploy Another
               </Button>
-              <Button variant="gradient" asChild>
-                <a href="/">Go to Dashboard</a>
+              <Button variant="gradient" onClick={() => navigate('/')}>
+                Go to Dashboard
               </Button>
             </div>
           </div>
