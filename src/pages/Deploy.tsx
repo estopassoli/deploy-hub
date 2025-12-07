@@ -50,6 +50,8 @@ export default function Deploy() {
     domain: '',
     type: '',
     branch: 'main',
+    installCommand: '',
+    envVars: '',
   });
   const [portError, setPortError] = useState('');
   const [portChecking, setPortChecking] = useState(false);
@@ -137,6 +139,8 @@ export default function Deploy() {
         domain: formData.domain || undefined,
         type: formData.type as 'nestjs' | 'nextjs' | 'vitejs',
         branch: formData.branch,
+        installCommand: formData.installCommand || undefined,
+        envVars: formData.envVars || undefined,
       });
 
       setDeployResult(result);
@@ -180,6 +184,8 @@ export default function Deploy() {
       domain: '',
       type: '',
       branch: 'main',
+      installCommand: '',
+      envVars: '',
     });
     setDeployLogs([]);
     setDeployResult(null);
@@ -351,6 +357,40 @@ export default function Deploy() {
                     </SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="installCommand" className="flex items-center gap-2">
+                  <Server className="h-4 w-4" />
+                  Install Command (optional)
+                </Label>
+                <Input
+                  id="installCommand"
+                  placeholder="npm ci --prefer-offline"
+                  value={formData.installCommand}
+                  onChange={(e) => setFormData({ ...formData, installCommand: e.target.value })}
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Custom install command. Default: npm ci --prefer-offline
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="envVars" className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  Environment Variables (optional)
+                </Label>
+                <textarea
+                  id="envVars"
+                  placeholder="DATABASE_URL=postgres://...&#10;SECRET_KEY=abc123&#10;NODE_ENV=production"
+                  value={formData.envVars}
+                  onChange={(e) => setFormData({ ...formData, envVars: e.target.value })}
+                  className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <p className="text-xs text-muted-foreground">
+                  One variable per line in KEY=value format. Will be saved as .env
+                </p>
               </div>
             </div>
 

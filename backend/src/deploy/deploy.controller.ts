@@ -26,6 +26,14 @@ class DeployDto {
   @IsOptional()
   @IsString()
   branch?: string;
+
+  @IsOptional()
+  @IsString()
+  installCommand?: string;
+
+  @IsOptional()
+  @IsString()
+  envVars?: string;
 }
 
 @Controller('deploy')
