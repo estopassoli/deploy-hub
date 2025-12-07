@@ -299,10 +299,10 @@ export default function Deploy() {
                     key={index} 
                     className={cn(
                       'py-0.5',
-                      log.startsWith('✓') && 'text-success',
-                      log.startsWith('▶') && 'text-primary',
-                      log.startsWith('🚀') && 'text-primary font-bold',
-                      log.startsWith('  ') && 'text-muted-foreground pl-4'
+                      log?.startsWith('✓') && 'text-success',
+                      log?.startsWith('▶') && 'text-primary',
+                      log?.startsWith('🚀') && 'text-primary font-bold',
+                      log?.startsWith('  ') && 'text-muted-foreground pl-4'
                     )}
                   >
                     {log || '\u00A0'}
