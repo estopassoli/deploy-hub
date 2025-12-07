@@ -42,8 +42,8 @@ interface AppCardProps {
 }
 
 export function AppCard({ app, onRefresh }: AppCardProps) {
-  const status = statusConfig[app.status];
-  const type = typeConfig[app.type];
+  const status = statusConfig[app.status] || statusConfig.stopped;
+  const type = typeConfig[app.type] || { label: app.type || 'Unknown', color: 'bg-muted text-muted-foreground' };
 
   const handleRestart = async () => {
     try {
@@ -130,18 +130,20 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
 
       {/* Body */}
       <div className="p-4 space-y-3">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Domain</span>
-          <a 
-            href={`https://${app.domain}`} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-primary hover:underline"
-          >
-            {app.domain}
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
+        {app.domain && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Domain</span>
+            <a 
+              href={`https://${app.domain}`} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-primary hover:underline"
+            >
+              {app.domain}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        )}
 
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Status</span>
@@ -190,8 +192,8 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
 
       {/* Footer */}
       <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground">
-        <span>Last deploy: {app.lastDeploy}</span>
-        <span className="font-mono">{app.currentVersion.slice(0, 16)}</span>
+        <span>Last deploy: {app.lastDeploy || 'Never'}</span>
+        <span className="font-mono">{app.currentVersion?.slice(0, 16) || 'N/A'}</span>
       </div>
     </div>
   );
