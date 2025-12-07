@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
+import api from '@/lib/api';
 
 const statusConfig: Record<AppStatus, { label: string; color: string; bg: string }> = {
   running: { label: 'Running', color: 'text-success', bg: 'bg-success' },
@@ -37,22 +38,41 @@ const typeConfig: Record<AppType, { label: string; color: string }> = {
 
 interface AppCardProps {
   app: App;
+  onRefresh?: () => void;
 }
 
-export function AppCard({ app }: AppCardProps) {
+export function AppCard({ app, onRefresh }: AppCardProps) {
   const status = statusConfig[app.status];
   const type = typeConfig[app.type];
 
-  const handleRestart = () => {
-    toast.success(`Restarting ${app.name}...`);
+  const handleRestart = async () => {
+    try {
+      await api.restartApp(app.id);
+      toast.success(`Restarting ${app.name}...`);
+      onRefresh?.();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to restart');
+    }
   };
 
-  const handleStop = () => {
-    toast.success(`Stopping ${app.name}...`);
+  const handleStop = async () => {
+    try {
+      await api.stopApp(app.id);
+      toast.success(`Stopping ${app.name}...`);
+      onRefresh?.();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to stop');
+    }
   };
 
-  const handleDelete = () => {
-    toast.success(`Deleting PM2 process for ${app.name}...`);
+  const handleDelete = async () => {
+    try {
+      await api.deleteApp(app.id);
+      toast.success(`Deleted ${app.name}`);
+      onRefresh?.();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete');
+    }
   };
 
   return (

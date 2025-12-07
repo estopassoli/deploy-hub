@@ -14,11 +14,15 @@ import {
   Trash2,
   Download,
   Search,
-  Filter
+  Filter,
+  Loader2
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { mockApps } from '@/data/mockData';
 import { cn } from '@/lib/utils';
+import api from '@/lib/api';
+import { wsClient } from '@/lib/websocket';
+import { toast } from 'sonner';
+import { App } from '@/types/app';
 
 interface LogLine {
   id: string;
@@ -28,50 +32,6 @@ interface LogLine {
   message: string;
 }
 
-const generateRandomLog = (apps: string[]): LogLine => {
-  const levels: LogLine['level'][] = ['info', 'warn', 'error', 'debug'];
-  const messages = {
-    info: [
-      'Request received: GET /api/users',
-      'Response sent: 200 OK',
-      'Database query executed in 12ms',
-      'Cache hit for key: user_session',
-      'WebSocket connection established',
-    ],
-    warn: [
-      'High memory usage: 85%',
-      'Slow query detected: 450ms',
-      'Rate limit approaching for IP: 192.168.1.1',
-      'Deprecated API endpoint accessed',
-    ],
-    error: [
-      'ECONNREFUSED: Database connection failed',
-      'TypeError: Cannot read property of undefined',
-      'JWT token expired',
-      'File not found: /uploads/image.png',
-    ],
-    debug: [
-      'Loading environment variables...',
-      'Initializing middleware stack',
-      'Parsing request body',
-      'Validating input schema',
-    ],
-  };
-
-  const level = levels[Math.floor(Math.random() * levels.length)];
-  const app = apps[Math.floor(Math.random() * apps.length)];
-  const messageList = messages[level];
-  const message = messageList[Math.floor(Math.random() * messageList.length)];
-
-  return {
-    id: Math.random().toString(36).substr(2, 9),
-    timestamp: new Date(),
-    level,
-    app,
-    message,
-  };
-};
-
 const levelColors = {
   info: 'text-cyan-400',
   warn: 'text-warning',
@@ -80,31 +40,62 @@ const levelColors = {
 };
 
 export default function Logs() {
+  const [apps, setApps] = useState<App[]>([]);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [isStreaming, setIsStreaming] = useState(true);
   const [selectedApp, setSelectedApp] = useState<string>('all');
   const [selectedLevel, setSelectedLevel] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  const appNames = mockApps.map(app => app.name);
+  useEffect(() => {
+    loadApps();
+  }, []);
 
   useEffect(() => {
-    if (!isStreaming) return;
+    if (isStreaming) {
+      wsClient.connect();
+      
+      const handleLog = (logData: any) => {
+        const newLog: LogLine = {
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: new Date(logData.timestamp || Date.now()),
+          level: logData.level || 'info',
+          app: logData.app || 'system',
+          message: logData.message || logData,
+        };
+        setLogs(prev => [...prev.slice(-200), newLog]);
+      };
 
-    const interval = setInterval(() => {
-      const newLog = generateRandomLog(appNames);
-      setLogs(prev => [...prev.slice(-200), newLog]);
-    }, 800);
+      wsClient.on('log', handleLog);
+      wsClient.on('pm2:log', handleLog);
 
-    return () => clearInterval(interval);
-  }, [isStreaming, appNames]);
+      return () => {
+        wsClient.off('log', handleLog);
+        wsClient.off('pm2:log', handleLog);
+      };
+    }
+  }, [isStreaming]);
 
   useEffect(() => {
     if (isStreaming) {
       logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [logs, isStreaming]);
+
+  const loadApps = async () => {
+    try {
+      const data = await api.getApps();
+      setApps(data);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to load apps');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const appNames = apps.map(app => app.name);
 
   const filteredLogs = logs.filter(log => {
     if (selectedApp !== 'all' && log.app !== selectedApp) return false;
@@ -114,6 +105,30 @@ export default function Logs() {
   });
 
   const clearLogs = () => setLogs([]);
+
+  const exportLogs = () => {
+    const content = filteredLogs.map(log => 
+      `${log.timestamp.toISOString()} [${log.level.toUpperCase()}] [${log.app}] ${log.message}`
+    ).join('\n');
+    
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `logs-${new Date().toISOString()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex h-[50vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -128,7 +143,7 @@ export default function Logs() {
           </div>
           <div className="flex items-center gap-2">
             <Button 
-              variant={isStreaming ? 'destructive' : 'success'}
+              variant={isStreaming ? 'destructive' : 'default'}
               onClick={() => setIsStreaming(!isStreaming)}
             >
               {isStreaming ? (
@@ -147,7 +162,7 @@ export default function Logs() {
               <Trash2 className="h-4 w-4" />
               Clear
             </Button>
-            <Button variant="outline">
+            <Button variant="outline" onClick={exportLogs}>
               <Download className="h-4 w-4" />
               Export
             </Button>
