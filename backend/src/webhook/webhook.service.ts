@@ -62,13 +62,13 @@ export class WebhookService {
     };
   }
 
-  async generateGitHubActionsWorkflow(appId: string, sshHost: string, sshUser: string): Promise<string> {
+  async generateGitHubActionsWorkflow(appId: string, sshHost: string, sshUser: string): Promise<{ workflow: string }> {
     const app = await this.prisma.app.findUnique({ where: { id: appId } });
     if (!app) throw new BadRequestException('App não encontrado');
 
     const apiUrl = process.env.API_URL || 'https://api-panel.auraai.chat';
 
-    return `name: Deploy ${app.name}
+    const workflow = `name: Deploy ${app.name}
 
 on:
   push:
@@ -83,7 +83,7 @@ jobs:
         run: |
           curl -X POST "${apiUrl}/api/webhook/github/${app.name}" \\
             -H "Content-Type: application/json" \\
-            -H "X-Hub-Signature-256: sha256=\$(echo -n '{}' | openssl dgst -sha256 -hmac '\${{ secrets.DEPLOY_WEBHOOK_SECRET }}' | awk '{print \$2}')" \\
+            -H "X-Hub-Signature-256: sha256=$(echo -n '{}' | openssl dgst -sha256 -hmac '\${{ secrets.DEPLOY_WEBHOOK_SECRET }}' | awk '{print \$2}')" \\
             -H "X-GitHub-Event: push" \\
             -d '{"ref": "refs/heads/${app.branch}", "head_commit": {"message": "\${{ github.event.head_commit.message }}"}}'
 
@@ -95,6 +95,8 @@ jobs:
         if: failure()
         run: echo "❌ Deploy failed for ${app.name}"
 `;
+
+    return { workflow };
   }
 
   async regenerateWebhookSecret(appId: string) {

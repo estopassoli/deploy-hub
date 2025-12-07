@@ -126,7 +126,8 @@ class ApiClient {
 
   // GitHub/Webhook
   async getGithubWorkflow(appId: string) {
-    return this.request<string>(`/webhook/github/workflow/${appId}`);
+    const result = await this.request<{ workflow: string }>(`/webhook/github/workflow/${appId}`);
+    return result.workflow;
   }
 
   async regenerateWebhookSecret(appId: string) {
