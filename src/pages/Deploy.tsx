@@ -52,6 +52,9 @@ export default function Deploy() {
     type: '',
     branch: 'main',
     installCommand: '',
+    buildCommand: '',
+    migrateCommand: '',
+    startCommand: '',
     envVars: '',
     generateSSL: false,
   });
@@ -142,6 +145,9 @@ export default function Deploy() {
         type: formData.type as 'nestjs' | 'nextjs' | 'vitejs',
         branch: formData.branch,
         installCommand: formData.installCommand || undefined,
+        buildCommand: formData.buildCommand || undefined,
+        migrateCommand: formData.migrateCommand || undefined,
+        startCommand: formData.startCommand || undefined,
         envVars: formData.envVars || undefined,
         generateSSL: formData.generateSSL,
       });
@@ -188,6 +194,9 @@ export default function Deploy() {
       type: '',
       branch: 'main',
       installCommand: '',
+      buildCommand: '',
+      migrateCommand: '',
+      startCommand: '',
       envVars: '',
       generateSSL: false,
     });
@@ -364,23 +373,6 @@ export default function Deploy() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="installCommand" className="flex items-center gap-2">
-                  <Server className="h-4 w-4" />
-                  Install Command (optional)
-                </Label>
-                <Input
-                  id="installCommand"
-                  placeholder="npm ci --prefer-offline"
-                  value={formData.installCommand}
-                  onChange={(e) => setFormData({ ...formData, installCommand: e.target.value })}
-                  className="font-mono"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Custom install command. Default: npm ci --prefer-offline
-                </p>
-              </div>
-
-              <div className="space-y-2">
                 <Label htmlFor="envVars" className="flex items-center gap-2">
                   <AlertCircle className="h-4 w-4" />
                   Environment Variables (optional)
@@ -394,6 +386,59 @@ export default function Deploy() {
                 />
                 <p className="text-xs text-muted-foreground">
                   One variable per line in KEY=value format. Will be saved as .env
+                </p>
+              </div>
+
+              {/* Custom Commands Section */}
+              <div className="border-t border-border pt-4">
+                <h3 className="text-sm font-medium mb-4 flex items-center gap-2">
+                  <Server className="h-4 w-4" />
+                  Custom Commands (optional)
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="installCommand" className="text-xs">Install Command</Label>
+                    <Input
+                      id="installCommand"
+                      placeholder="npm ci (default)"
+                      value={formData.installCommand}
+                      onChange={(e) => setFormData({ ...formData, installCommand: e.target.value })}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="buildCommand" className="text-xs">Build Command</Label>
+                    <Input
+                      id="buildCommand"
+                      placeholder="npm run build (default)"
+                      value={formData.buildCommand}
+                      onChange={(e) => setFormData({ ...formData, buildCommand: e.target.value })}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="migrateCommand" className="text-xs">Migrate Command</Label>
+                    <Input
+                      id="migrateCommand"
+                      placeholder="npx prisma migrate deploy (Prisma)"
+                      value={formData.migrateCommand}
+                      onChange={(e) => setFormData({ ...formData, migrateCommand: e.target.value })}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="startCommand" className="text-xs">Start Command</Label>
+                    <Input
+                      id="startCommand"
+                      placeholder="npm run start (default)"
+                      value={formData.startCommand}
+                      onChange={(e) => setFormData({ ...formData, startCommand: e.target.value })}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Leave blank to use default commands for each step.
                 </p>
               </div>
 
