@@ -132,7 +132,7 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
             <DropdownMenuItem 
               onClick={handleRedeploy} 
               disabled={isRedeploying}
-              className="flex items-center gap-2 text-primary focus:text-primary"
+              className="flex items-center gap-2 text-cyan-400 focus:text-cyan-400 focus:bg-cyan-400/10"
             >
               <RefreshCw className={cn("h-4 w-4", isRedeploying && "animate-spin")} />
               {isRedeploying ? 'Redeploying...' : 'Pull & Redeploy'}
