@@ -169,11 +169,9 @@ export class DeployService {
         this.log(app.name, '✓ Environment file created');
       }
 
-      // Install dependencies
+      // Install dependencies with auto-recovery
       this.log(app.name, '▶ Installing dependencies...');
-      const installCmd = options.installCommand || 'npm ci --prefer-offline';
-      this.log(app.name, `  Command: ${installCmd}`);
-      await this.runCommand(installCmd, releaseDir, app.name);
+      await this.installDependencies(releaseDir, app.name, options.installCommand);
       this.log(app.name, '✓ Dependencies installed');
 
       // Check for Prisma
@@ -326,6 +324,55 @@ export class DeployService {
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
+  }
+
+  /**
+   * Auto-diagnóstico de instalação de dependências
+   * Tenta npm ci, se falhar por lock file desatualizado, usa npm install
+   */
+  private async installDependencies(cwd: string, appName: string, customCommand?: string): Promise<void> {
+    // Se tem comando customizado, usa diretamente
+    if (customCommand) {
+      this.log(appName, `  Command: ${customCommand}`);
+      await this.runCommand(customCommand, cwd, appName);
+      return;
+    }
+
+    // Verifica se package-lock.json existe
+    const hasLockFile = fs.existsSync(path.join(cwd, 'package-lock.json'));
+    
+    if (!hasLockFile) {
+      this.log(appName, '  ⚠️ No package-lock.json found, using npm install');
+      this.log(appName, '  Command: npm install');
+      await this.runCommand('npm install', cwd, appName);
+      return;
+    }
+
+    // Tenta npm ci primeiro (mais rápido e confiável)
+    try {
+      this.log(appName, '  Command: npm ci --prefer-offline');
+      await this.runCommand('npm ci --prefer-offline', cwd, appName);
+    } catch (error) {
+      const errorMsg = error.message || '';
+      
+      // Detecta erro de lock file desatualizado
+      if (errorMsg.includes('EUSAGE') || 
+          errorMsg.includes('package.json and package-lock.json') ||
+          errorMsg.includes('Missing:') ||
+          errorMsg.includes('out of sync')) {
+        this.log(appName, '');
+        this.log(appName, '  🔧 Auto-diagnóstico: Lock file desatualizado detectado');
+        this.log(appName, '  ⚡ Fallback: Usando npm install para sincronizar...');
+        this.log(appName, '  Command: npm install');
+        
+        await this.runCommand('npm install', cwd, appName);
+        
+        this.log(appName, '  ✓ Dependências sincronizadas via npm install');
+      } else {
+        // Outro tipo de erro, repassa
+        throw error;
+      }
+    }
   }
 
   private generatePM2Config(app: any, currentPath: string): string {
