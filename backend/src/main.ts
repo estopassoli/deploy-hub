@@ -6,7 +6,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.enableCors({
-    origin: ['http://localhost:10000', 'https://panel.auraai.chat'],
+    origin: '*',
   });
 
   app.useGlobalPipes(new ValidationPipe({
