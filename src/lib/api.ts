@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://62.72.9.22:10001/api';
+const API_URL = import.meta.env.VITE_API_URL || 'https://api-panel.auraai.chat/api';
 
 class ApiClient {
   private token: string | null = null;
