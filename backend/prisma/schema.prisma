@@ -42,7 +42,7 @@ model Deploy {
   path        String   // full path to release
   status      String   @default("pending") // pending, building, success, failed
   isCurrent   Boolean  @default(false)
-  logs        String?  @db.Text
+  logs        String?
   createdAt   DateTime @default(now())
 }
 
