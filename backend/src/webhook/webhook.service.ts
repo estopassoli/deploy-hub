@@ -11,11 +11,18 @@ export class WebhookService {
   ) { }
 
   async handleGitHubWebhook(appName: string, signature: string, event: string, payload: any, rawBody?: Buffer) {
+    console.log(`[Webhook] Received webhook for app: ${appName}`);
+    console.log(`[Webhook] Event: ${event}`);
+    console.log(`[Webhook] Signature received: ${signature}`);
+    
     const app = await this.prisma.app.findUnique({ where: { name: appName } });
 
     if (!app) {
+      console.log(`[Webhook] App not found: ${appName}`);
       throw new BadRequestException('App não encontrado');
     }
+
+    console.log(`[Webhook] App found: ${app.name}, branch: ${app.branch}`);
 
     // Verify signature using raw body for accurate HMAC calculation
     if (app.webhookSecret) {
@@ -25,9 +32,16 @@ export class WebhookService {
         .update(bodyToHash)
         .digest('hex');
 
+      console.log(`[Webhook] Body to hash: ${bodyToHash}`);
+      console.log(`[Webhook] Expected signature: ${expectedSignature}`);
+
       if (signature !== expectedSignature) {
+        console.log(`[Webhook] Signature mismatch!`);
         throw new UnauthorizedException('Assinatura inválida');
       }
+      console.log(`[Webhook] Signature verified!`);
+    } else {
+      console.log(`[Webhook] No webhook secret configured, skipping signature verification`);
     }
 
     // Only handle push events
