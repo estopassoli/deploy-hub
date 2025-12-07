@@ -66,8 +66,9 @@ export class WebhookService {
     const app = await this.prisma.app.findUnique({ where: { id: appId } });
     if (!app) throw new BadRequestException('App não encontrado');
 
-    return `
-name: Deploy ${app.name}
+    const apiUrl = process.env.API_URL || 'https://api-panel.auraai.chat';
+
+    return `name: Deploy ${app.name}
 
 on:
   push:
@@ -78,16 +79,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: \${{ secrets.SSH_HOST }}
-          username: \${{ secrets.SSH_USER }}
-          key: \${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            curl -X POST http://localhost:10001/api/deploy/${app.id} \\
-              -H "Authorization: Bearer \${{ secrets.DEPLOYHUB_TOKEN }}" \\
-              -H "Content-Type: application/json"
+      - name: Trigger Deploy
+        run: |
+          curl -X POST "${apiUrl}/api/webhook/github/${app.name}" \\
+            -H "Content-Type: application/json" \\
+            -H "X-Hub-Signature-256: sha256=\$(echo -n '{}' | openssl dgst -sha256 -hmac '\${{ secrets.DEPLOY_WEBHOOK_SECRET }}' | awk '{print \$2}')" \\
+            -H "X-GitHub-Event: push" \\
+            -d '{"ref": "refs/heads/${app.branch}", "head_commit": {"message": "\${{ github.event.head_commit.message }}"}}'
 
       - name: Notify Success
         if: success()

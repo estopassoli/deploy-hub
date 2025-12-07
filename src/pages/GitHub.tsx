@@ -187,13 +187,13 @@ export default function GitHub() {
               </p>
               <div className="flex gap-2">
                 <Input
-                  value={`${import.meta.env.VITE_API_URL || 'http://62.72.9.22:10001'}/api/webhook/github`}
+                  value={`https://api-panel.auraai.chat/api/webhook/github/${selectedApp.name}`}
                   readOnly
                   className="font-mono text-sm"
                 />
                 <Button 
                   variant="outline" 
-                  onClick={() => copyToClipboard(`${import.meta.env.VITE_API_URL || 'http://62.72.9.22:10001'}/api/webhook/github`, 'yaml')}
+                  onClick={() => copyToClipboard(`https://api-panel.auraai.chat/api/webhook/github/${selectedApp.name}`, 'yaml')}
                 >
                   <Copy className="h-4 w-4" />
                 </Button>
