@@ -15,7 +15,9 @@ import {
   GitCommit,
   Trash2,
   AlertTriangle,
-  Loader2
+  Loader2,
+  FileText,
+  X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -30,6 +32,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import api from '@/lib/api';
 import { App } from '@/types/app';
 
@@ -38,6 +47,7 @@ interface Version {
   timestamp: string;
   commitHash?: string;
   commitMessage?: string;
+  status?: string;
   isCurrent: boolean;
 }
 
@@ -47,6 +57,9 @@ export default function Versions() {
   const [versions, setVersions] = useState<Version[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+  const [logsModalOpen, setLogsModalOpen] = useState(false);
+  const [selectedDeployLogs, setSelectedDeployLogs] = useState<{ version: string; logs: string; status: string } | null>(null);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   
   const selectedApp = apps.find(app => app.id === selectedAppId);
 
@@ -103,6 +116,26 @@ export default function Versions() {
       loadVersions();
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete version');
+    }
+  };
+
+  const handleViewLogs = async (deployId: string, version: string) => {
+    setLogsModalOpen(true);
+    setIsLoadingLogs(true);
+    setSelectedDeployLogs(null);
+    
+    try {
+      const data = await api.getDeployLogs(deployId);
+      setSelectedDeployLogs({
+        version: data.version,
+        logs: data.logs,
+        status: data.status,
+      });
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to load deploy logs');
+      setLogsModalOpen(false);
+    } finally {
+      setIsLoadingLogs(false);
     }
   };
 
@@ -253,6 +286,14 @@ export default function Versions() {
                           </div>
 
                           <div className="flex items-center gap-2">
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => handleViewLogs(version.id, version.timestamp)}
+                            >
+                              <FileText className="h-4 w-4" />
+                              Logs
+                            </Button>
                             {!version.isCurrent && (
                               <>
                                 <AlertDialog>
@@ -266,7 +307,7 @@ export default function Versions() {
                                     <AlertDialogHeader>
                                       <AlertDialogTitle>Confirm Rollback</AlertDialogTitle>
                                       <AlertDialogDescription>
-                                        This will switch the active version to <span className="font-mono">{version.timestamp}</span> and restart the PM2 process. The current version will remain available for future rollback.
+                                        This will switch the active version to <span className="font-mono">{version.timestamp}</span> and restart the PM2 process.
                                       </AlertDialogDescription>
                                     </AlertDialogHeader>
                                     <AlertDialogFooter>
@@ -291,7 +332,7 @@ export default function Versions() {
                                         Delete Version
                                       </AlertDialogTitle>
                                       <AlertDialogDescription>
-                                        This will permanently delete the release files for version <span className="font-mono">{version.timestamp}</span>. This action cannot be undone.
+                                        This will permanently delete version <span className="font-mono">{version.timestamp}</span>.
                                       </AlertDialogDescription>
                                     </AlertDialogHeader>
                                     <AlertDialogFooter>
@@ -329,6 +370,29 @@ export default function Versions() {
           </>
         )}
       </div>
+
+      {/* Logs Modal */}
+      <Dialog open={logsModalOpen} onOpenChange={setLogsModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Deploy Logs - {selectedDeployLogs?.version}
+            </DialogTitle>
+          </DialogHeader>
+          {isLoadingLogs ? (
+            <div className="flex h-[300px] items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : (
+            <ScrollArea className="h-[500px] rounded-lg border border-border bg-background p-4">
+              <pre className="font-mono text-sm whitespace-pre-wrap text-foreground/90">
+                {selectedDeployLogs?.logs}
+              </pre>
+            </ScrollArea>
+          )}
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
