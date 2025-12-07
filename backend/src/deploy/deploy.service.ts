@@ -329,20 +329,18 @@ export class DeployService {
   }
 
   private generatePM2Config(app: any, currentPath: string): string {
-    const startScript = app.type === 'nestjs' 
-      ? 'dist/main.js' 
-      : app.type === 'nextjs' 
-        ? 'node_modules/.bin/next start' 
-        : null;
-
-    if (!startScript) return '';
+    // Use npm run start for all app types - more reliable than direct script paths
+    const isSupported = ['nestjs', 'nextjs'].includes(app.type);
+    if (!isSupported) return '';
 
     return `
 module.exports = {
   apps: [{
     name: '${app.name}',
     cwd: '${currentPath}',
-    script: '${startScript}',
+    script: 'npm',
+    args: 'run start',
+    interpreter: 'none',
     instances: 1,
     autorestart: true,
     watch: false,
