@@ -12,11 +12,17 @@ import {
   GitBranch,
   RefreshCw,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Settings,
+  Save,
+  Loader2
 } from 'lucide-react';
 import { App, AppStatus, AppType } from '@/types/app';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,6 +74,11 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
   const [isRedeploying, setIsRedeploying] = useState(false);
   const [showRedeployModal, setShowRedeployModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showEnvVarsModal, setShowEnvVarsModal] = useState(false);
+  const [envVars, setEnvVars] = useState('');
+  const [installCommand, setInstallCommand] = useState('');
+  const [isSavingEnvVars, setIsSavingEnvVars] = useState(false);
+  const [isLoadingEnvVars, setIsLoadingEnvVars] = useState(false);
   const [deployLogs, setDeployLogs] = useState<string[]>([]);
   const [deployComplete, setDeployComplete] = useState(false);
   const [deploySuccess, setDeploySuccess] = useState(false);
@@ -165,6 +176,33 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
     }
   };
 
+  const handleOpenEnvVars = async () => {
+    setShowEnvVarsModal(true);
+    setIsLoadingEnvVars(true);
+    try {
+      const data = await api.getAppEnvVars(app.id);
+      setEnvVars(data.envVars);
+      setInstallCommand(data.installCommand);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to load env vars');
+    } finally {
+      setIsLoadingEnvVars(false);
+    }
+  };
+
+  const handleSaveEnvVars = async () => {
+    setIsSavingEnvVars(true);
+    try {
+      await api.updateApp(app.id, { envVars, installCommand });
+      toast.success('Environment variables saved! Changes will apply on next deploy.');
+      setShowEnvVarsModal(false);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to save');
+    } finally {
+      setIsSavingEnvVars(false);
+    }
+  };
+
   return (
     <>
       <div className="group relative overflow-hidden rounded-xl border border-border bg-card transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5">
@@ -200,6 +238,10 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
                   <RotateCcw className="h-4 w-4" />
                   Rollback
                 </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleOpenEnvVars} className="flex items-center gap-2">
+                <Settings className="h-4 w-4" />
+                Environment Variables
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem 
@@ -373,6 +415,75 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Environment Variables Modal */}
+      <Dialog open={showEnvVarsModal} onOpenChange={setShowEnvVarsModal}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              Environment Variables - {app.name}
+            </DialogTitle>
+            <DialogDescription>
+              Configure environment variables and custom install command. Changes apply on next deploy.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {isLoadingEnvVars ? (
+            <div className="flex h-[200px] items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="envVars">Environment Variables (.env format)</Label>
+                <Textarea
+                  id="envVars"
+                  placeholder="DATABASE_URL=postgres://...&#10;API_KEY=your_api_key&#10;NODE_ENV=production"
+                  value={envVars}
+                  onChange={(e) => setEnvVars(e.target.value)}
+                  className="min-h-[200px] font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  One variable per line in KEY=VALUE format. These will be available during build and runtime.
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="installCommand">Custom Install Command (optional)</Label>
+                <Input
+                  id="installCommand"
+                  placeholder="npm install (default)"
+                  value={installCommand}
+                  onChange={(e) => setInstallCommand(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Leave empty to use automatic detection (npm ci or npm install).
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEnvVarsModal(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEnvVars} disabled={isSavingEnvVars || isLoadingEnvVars}>
+              {isSavingEnvVars ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Changes
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

@@ -273,6 +273,25 @@ export default function Versions() {
                                   Active
                                 </span>
                               )}
+                              {/* Status Badge */}
+                              {version.status === 'success' && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-success/20 px-2 py-0.5 text-xs font-medium text-success">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Success
+                                </span>
+                              )}
+                              {version.status === 'failed' && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-destructive/20 px-2 py-0.5 text-xs font-medium text-destructive">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  Failed
+                                </span>
+                              )}
+                              {version.status === 'building' && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-warning/20 px-2 py-0.5 text-xs font-medium text-warning">
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Building
+                                </span>
+                              )}
                             </div>
                             <p className="mt-1 text-sm text-muted-foreground">
                               {version.commitMessage || 'No commit message'}

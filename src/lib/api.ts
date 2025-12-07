@@ -89,11 +89,16 @@ class ApiClient {
     });
   }
 
-  async updateApp(id: string, data: { domain?: string; branch?: string }) {
+  async updateApp(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string }) {
     return this.request<any>(`/apps/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+  }
+
+  async getAppEnvVars(id: string) {
+    const app = await this.request<any>(`/apps/${id}`);
+    return { envVars: app.envVars || '', installCommand: app.installCommand || '' };
   }
 
   async deleteApp(id: string) {
