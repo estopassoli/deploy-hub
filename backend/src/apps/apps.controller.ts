@@ -14,6 +14,8 @@ class CreateAppDto {
 class UpdateAppDto {
   domain?: string;
   branch?: string;
+  envVars?: string;
+  installCommand?: string;
 }
 
 @Controller('apps')

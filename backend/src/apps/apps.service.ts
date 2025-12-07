@@ -85,13 +85,19 @@ export class AppsService {
     return app;
   }
 
-  async update(id: string, data: { domain?: string; branch?: string }) {
+  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string }) {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
+    const updateData: any = {};
+    if (data.domain !== undefined) updateData.domain = data.domain;
+    if (data.branch !== undefined) updateData.branch = data.branch;
+    if (data.envVars !== undefined) updateData.envVars = data.envVars;
+    if (data.installCommand !== undefined) updateData.installCommand = data.installCommand;
+
     const updated = await this.prisma.app.update({
       where: { id },
-      data,
+      data: updateData,
     });
 
     // Update Nginx config if domain changed
