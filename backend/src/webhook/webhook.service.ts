@@ -10,18 +10,19 @@ export class WebhookService {
     private deployService: DeployService,
   ) { }
 
-  async handleGitHubWebhook(appName: string, signature: string, event: string, payload: any) {
+  async handleGitHubWebhook(appName: string, signature: string, event: string, payload: any, rawBody?: Buffer) {
     const app = await this.prisma.app.findUnique({ where: { name: appName } });
 
     if (!app) {
       throw new BadRequestException('App não encontrado');
     }
 
-    // Verify signature
+    // Verify signature using raw body for accurate HMAC calculation
     if (app.webhookSecret) {
+      const bodyToHash = rawBody ? rawBody.toString('utf8') : JSON.stringify(payload);
       const expectedSignature = 'sha256=' + crypto
         .createHmac('sha256', app.webhookSecret)
-        .update(JSON.stringify(payload))
+        .update(bodyToHash)
         .digest('hex');
 
       if (signature !== expectedSignature) {
@@ -68,6 +69,7 @@ export class WebhookService {
 
     const apiUrl = process.env.API_URL || 'https://api-panel.auraai.chat';
 
+    // Build the JSON payload as a proper string for accurate HMAC
     const workflow = `name: Deploy ${app.name}
 
 on:
@@ -80,12 +82,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Deploy
+        env:
+          WEBHOOK_SECRET: \${{ secrets.DEPLOY_WEBHOOK_SECRET }}
         run: |
+          PAYLOAD='{"ref":"refs/heads/${app.branch}","head_commit":{"message":"$\{GITHUB_SHA:0:7} - Auto deploy"}}'
+          SIGNATURE="sha256=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | awk '{print $2}')"
+          
           curl -X POST "${apiUrl}/api/webhook/github/${app.name}" \\
             -H "Content-Type: application/json" \\
-            -H "X-Hub-Signature-256: sha256=$(echo -n '{}' | openssl dgst -sha256 -hmac '\${{ secrets.DEPLOY_WEBHOOK_SECRET }}' | awk '{print \$2}')" \\
+            -H "X-Hub-Signature-256: $SIGNATURE" \\
             -H "X-GitHub-Event: push" \\
-            -d '{"ref": "refs/heads/${app.branch}", "head_commit": {"message": "\${{ github.event.head_commit.message }}"}}'
+            -d "$PAYLOAD"
 
       - name: Notify Success
         if: success()
