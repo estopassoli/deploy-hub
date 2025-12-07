@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { 
   Play, 
   Square, 
@@ -8,7 +9,8 @@ import {
   ExternalLink,
   MoreVertical,
   Clock,
-  GitBranch
+  GitBranch,
+  RefreshCw
 } from 'lucide-react';
 import { App, AppStatus, AppType } from '@/types/app';
 import { cn } from '@/lib/utils';
@@ -42,8 +44,24 @@ interface AppCardProps {
 }
 
 export function AppCard({ app, onRefresh }: AppCardProps) {
+  const navigate = useNavigate();
+  const [isRedeploying, setIsRedeploying] = useState(false);
   const status = statusConfig[app.status] || statusConfig.stopped;
   const type = typeConfig[app.type] || { label: app.type || 'Unknown', color: 'bg-muted text-muted-foreground' };
+
+  const handleRedeploy = async () => {
+    try {
+      setIsRedeploying(true);
+      toast.info(`Starting redeploy for ${app.name}...`);
+      await api.redeploy(app.id);
+      toast.success(`Redeploy started for ${app.name}`);
+      onRefresh?.();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to redeploy');
+    } finally {
+      setIsRedeploying(false);
+    }
+  };
 
   const handleRestart = async () => {
     try {
@@ -109,6 +127,15 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
                 <RotateCcw className="h-4 w-4" />
                 Rollback
               </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem 
+              onClick={handleRedeploy} 
+              disabled={isRedeploying}
+              className="flex items-center gap-2 text-primary focus:text-primary"
+            >
+              <RefreshCw className={cn("h-4 w-4", isRedeploying && "animate-spin")} />
+              {isRedeploying ? 'Redeploying...' : 'Pull & Redeploy'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleRestart} className="flex items-center gap-2">
