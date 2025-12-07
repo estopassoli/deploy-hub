@@ -11,18 +11,14 @@ import {
   Clock,
   GitBranch,
   RefreshCw,
-  X,
   AlertTriangle,
   Settings,
-  Save,
   Loader2
 } from 'lucide-react';
 import { App, AppStatus, AppType } from '@/types/app';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { AppConfigModal } from './AppConfigModal';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -74,14 +70,7 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
   const [isRedeploying, setIsRedeploying] = useState(false);
   const [showRedeployModal, setShowRedeployModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showEnvVarsModal, setShowEnvVarsModal] = useState(false);
-  const [envVars, setEnvVars] = useState('');
-  const [installCommand, setInstallCommand] = useState('');
-  const [buildCommand, setBuildCommand] = useState('');
-  const [migrateCommand, setMigrateCommand] = useState('');
-  const [startCommand, setStartCommand] = useState('');
-  const [isSavingEnvVars, setIsSavingEnvVars] = useState(false);
-  const [isLoadingEnvVars, setIsLoadingEnvVars] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
   const [deployLogs, setDeployLogs] = useState<string[]>([]);
   const [deployComplete, setDeployComplete] = useState(false);
   const [deploySuccess, setDeploySuccess] = useState(false);
@@ -179,57 +168,8 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
     }
   };
 
-  const handleOpenEnvVars = async () => {
-    setShowEnvVarsModal(true);
-    setIsLoadingEnvVars(true);
-    try {
-      const data = await api.getAppConfig(app.id);
-      setEnvVars(data.envVars);
-      setInstallCommand(data.installCommand);
-      setBuildCommand(data.buildCommand);
-      setMigrateCommand(data.migrateCommand);
-      setStartCommand(data.startCommand);
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to load configuration');
-    } finally {
-      setIsLoadingEnvVars(false);
-    }
-  };
-
-  const handleSaveEnvVars = async () => {
-    setIsSavingEnvVars(true);
-    
-    // Log all state values before sending
-    console.log('[AppCard] Current state values:', {
-      envVars: envVars?.substring(0, 50) + '...',
-      installCommand,
-      buildCommand,
-      migrateCommand,
-      startCommand,
-    });
-    
-    const payload = { 
-      envVars: envVars || '', 
-      installCommand: installCommand || '', 
-      buildCommand: buildCommand || '', 
-      migrateCommand: migrateCommand || '', 
-      startCommand: startCommand || '' 
-    };
-    
-    console.log('[AppCard] Sending payload:', payload);
-    
-    try {
-      const result = await api.updateApp(app.id, payload);
-      console.log('[AppCard] Save result:', result);
-      toast.success('Configuration saved! Changes will apply on next deploy.');
-      setShowEnvVarsModal(false);
-      onRefresh?.();
-    } catch (error: any) {
-      console.error('[AppCard] Save error:', error);
-      toast.error(error.message || 'Failed to save');
-    } finally {
-      setIsSavingEnvVars(false);
-    }
+  const handleOpenConfig = () => {
+    setShowConfigModal(true);
   };
 
   return (
@@ -268,9 +208,9 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
                   Rollback
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleOpenEnvVars} className="flex items-center gap-2">
+              <DropdownMenuItem onClick={handleOpenConfig} className="flex items-center gap-2">
                 <Settings className="h-4 w-4" />
-                Environment Variables
+                Configurações
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem 
@@ -446,112 +386,13 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
       </AlertDialog>
 
       {/* Configuration Modal */}
-      <Dialog open={showEnvVarsModal} onOpenChange={setShowEnvVarsModal}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5" />
-              Configurações - {app.name}
-            </DialogTitle>
-            <DialogDescription>
-              Configure variáveis de ambiente e comandos customizados. Alterações serão aplicadas no próximo deploy.
-            </DialogDescription>
-          </DialogHeader>
-          
-          {isLoadingEnvVars ? (
-            <div className="flex h-[200px] items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="envVars">Variáveis de Ambiente (.env)</Label>
-                <Textarea
-                  id="envVars"
-                  placeholder="DATABASE_URL=postgres://...&#10;API_KEY=your_api_key&#10;NODE_ENV=production"
-                  value={envVars}
-                  onChange={(e) => setEnvVars(e.target.value)}
-                  className="min-h-[150px] font-mono text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Uma variável por linha no formato KEY=VALUE. Disponíveis durante build e runtime.
-                </p>
-              </div>
-              
-              <div className="border-t border-border pt-4">
-                <h4 className="text-sm font-medium mb-3">Comandos Customizados (opcional)</h4>
-                <div className="grid gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="installCommand" className="text-xs">Comando de Install</Label>
-                    <Input
-                      id="installCommand"
-                      placeholder="npm ci (padrão automático)"
-                      value={installCommand}
-                      onChange={(e) => setInstallCommand(e.target.value)}
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                  
-                  <div className="space-y-1.5">
-                    <Label htmlFor="buildCommand" className="text-xs">Comando de Build</Label>
-                    <Input
-                      id="buildCommand"
-                      placeholder="npm run build (padrão)"
-                      value={buildCommand}
-                      onChange={(e) => setBuildCommand(e.target.value)}
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                  
-                  <div className="space-y-1.5">
-                    <Label htmlFor="migrateCommand" className="text-xs">Comando de Migrate</Label>
-                    <Input
-                      id="migrateCommand"
-                      placeholder="npx prisma migrate deploy (padrão para Prisma)"
-                      value={migrateCommand}
-                      onChange={(e) => setMigrateCommand(e.target.value)}
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                  
-                  <div className="space-y-1.5">
-                    <Label htmlFor="startCommand" className="text-xs">Comando de Start</Label>
-                    <Input
-                      id="startCommand"
-                      placeholder="npm run start (padrão)"
-                      value={startCommand}
-                      onChange={(e) => setStartCommand(e.target.value)}
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Deixe em branco para usar os comandos padrão de cada etapa.
-                </p>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEnvVarsModal(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleSaveEnvVars} disabled={isSavingEnvVars || isLoadingEnvVars}>
-              {isSavingEnvVars ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Salvando...
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  Salvar
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AppConfigModal
+        appId={app.id}
+        appName={app.name}
+        open={showConfigModal}
+        onOpenChange={setShowConfigModal}
+        onSaved={onRefresh}
+      />
     </>
   );
 }
