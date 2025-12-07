@@ -229,13 +229,22 @@ export class DeployService {
 
       // Generate SSL certificate with Certbot if requested
       if (options.generateSSL && app.domain) {
-        this.log(app.name, '▶ Generating SSL certificate with Certbot...');
+        this.log(app.name, '▶ Checking Certbot installation...');
         try {
+          await execAsync('which certbot');
+          this.log(app.name, '✓ Certbot is installed');
+          
+          this.log(app.name, '▶ Generating SSL certificate with Certbot...');
           await this.runCommand(`sudo certbot --nginx -d ${app.domain} --non-interactive --agree-tos --email admin@${app.domain}`, '/tmp', app.name);
           this.log(app.name, `✓ SSL certificate generated for ${app.domain}`);
         } catch (e) {
-          this.log(app.name, `  ⚠️ Failed to generate SSL: ${e.message}`);
-          this.log(app.name, '  You can manually run: sudo certbot --nginx -d ' + app.domain);
+          if (e.message?.includes('which certbot')) {
+            this.log(app.name, '  ❌ Certbot is not installed');
+            this.log(app.name, '  To install: sudo apt install certbot python3-certbot-nginx');
+          } else {
+            this.log(app.name, `  ⚠️ Failed to generate SSL: ${e.message}`);
+            this.log(app.name, '  You can manually run: sudo certbot --nginx -d ' + app.domain);
+          }
         }
       } else if (options.generateSSL && !app.domain) {
         this.log(app.name, '  ⚠️ SSL generation skipped - no domain configured');
