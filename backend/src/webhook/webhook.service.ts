@@ -1,18 +1,18 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { DeployService } from '../deploy/deploy.service';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { DeployService } from '../deploy/deploy.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class WebhookService {
   constructor(
     private prisma: PrismaService,
     private deployService: DeployService,
-  ) {}
+  ) { }
 
   async handleGitHubWebhook(appName: string, signature: string, event: string, payload: any) {
     const app = await this.prisma.app.findUnique({ where: { name: appName } });
-    
+
     if (!app) {
       throw new BadRequestException('App não encontrado');
     }
@@ -37,7 +37,7 @@ export class WebhookService {
     // Check if push is to the configured branch
     const ref = payload.ref || '';
     const branch = ref.replace('refs/heads/', '');
-    
+
     if (branch !== app.branch) {
       return { message: `Push para branch ${branch} ignorado (configurado: ${app.branch})` };
     }
@@ -104,13 +104,12 @@ jobs:
     if (!app) throw new BadRequestException('App não encontrado');
 
     const newSecret = crypto.randomBytes(32).toString('hex');
-    
+
     await this.prisma.app.update({
       where: { id: appId },
       data: { webhookSecret: newSecret },
     });
 
     return { secret: newSecret };
-  }
   }
 }
