@@ -52,36 +52,54 @@ export class DeployService {
 
   private async runCommand(command: string, cwd: string, appName: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const [cmd, ...args] = command.split(' ');
-      const proc = spawn(cmd, args, { cwd, shell: true });
+      this.log(appName, `$ ${command}`);
+      
+      const proc = spawn(command, [], { 
+        cwd, 
+        shell: true,
+        env: { ...process.env, FORCE_COLOR: '0' }
+      });
       
       let output = '';
       let errorOutput = '';
 
+      // Stream stdout line by line in real-time
       proc.stdout.on('data', (data) => {
-        const line = data.toString().trim();
-        if (line) {
-          output += line + '\n';
-          // Send first few meaningful lines
-          const lines = line.split('\n').slice(0, 3);
-          lines.forEach((l: string) => {
-            if (l.trim()) this.log(appName, `  ${l.trim().substring(0, 100)}`);
-          });
-        }
+        const text = data.toString();
+        output += text;
+        
+        // Split by lines and send each one
+        const lines = text.split('\n');
+        lines.forEach((line: string) => {
+          if (line.trim() || line === '') {
+            this.log(appName, `  │ ${line}`);
+          }
+        });
       });
 
+      // Stream stderr line by line in real-time
       proc.stderr.on('data', (data) => {
-        const line = data.toString().trim();
-        if (line) {
-          errorOutput += line + '\n';
-          // Only log important errors
-          if (line.toLowerCase().includes('error') || line.toLowerCase().includes('warn')) {
-            this.log(appName, `  ⚠ ${line.substring(0, 100)}`);
+        const text = data.toString();
+        errorOutput += text;
+        
+        // Split by lines and send each one
+        const lines = text.split('\n');
+        lines.forEach((line: string) => {
+          if (line.trim() || line === '') {
+            // Color code warnings and errors
+            if (line.toLowerCase().includes('error')) {
+              this.log(appName, `  │ ❌ ${line}`);
+            } else if (line.toLowerCase().includes('warn')) {
+              this.log(appName, `  │ ⚠️ ${line}`);
+            } else {
+              this.log(appName, `  │ ${line}`);
+            }
           }
-        }
+        });
       });
 
       proc.on('close', (code) => {
+        this.log(appName, `  └─ Exit code: ${code}`);
         if (code === 0) {
           resolve(output);
         } else {
@@ -89,7 +107,10 @@ export class DeployService {
         }
       });
 
-      proc.on('error', reject);
+      proc.on('error', (err) => {
+        this.log(appName, `  └─ Error: ${err.message}`);
+        reject(err);
+      });
     });
   }
 
