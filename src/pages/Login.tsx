@@ -5,51 +5,46 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Server, Lock, Mail, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function Login() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-  });
+  const [formData, setFormData] = useState({ email: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate login
-    setTimeout(() => {
-      if (formData.email === 'admin@deploy.hub' && formData.password === 'admin') {
-        toast.success('Welcome back!');
-        navigate('/');
-      } else {
-        toast.error('Invalid credentials');
-      }
+    try {
+      await login(formData.email, formData.password);
+      toast.success('Bem-vindo!');
+      navigate('/');
+    } catch (error: any) {
+      toast.error(error.message || 'Credenciais inválidas');
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      {/* Background Effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
       </div>
 
       <div className="relative w-full max-w-md">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-primary mb-4">
             <Server className="h-8 w-8 text-primary-foreground" />
           </div>
           <h1 className="text-3xl font-bold text-foreground">DeployHub</h1>
-          <p className="text-muted-foreground mt-2">Sign in to your DevOps panel</p>
+          <p className="text-muted-foreground mt-2">Acesse seu painel DevOps</p>
         </div>
 
-        {/* Login Form */}
         <div className="rounded-2xl border border-border bg-card p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
@@ -59,7 +54,7 @@ export default function Login() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="admin@deploy.hub"
+                  placeholder="admin@deployhub.local"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="pl-10"
@@ -69,7 +64,7 @@ export default function Login() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Senha</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -92,22 +87,15 @@ export default function Login() {
             </div>
 
             <Button type="submit" variant="gradient" className="w-full" size="lg" disabled={isLoading}>
-              {isLoading ? 'Signing in...' : 'Sign In'}
+              {isLoading ? 'Entrando...' : 'Entrar'}
             </Button>
           </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-sm text-muted-foreground">
-              Demo credentials: <code className="px-1 py-0.5 bg-secondary rounded">admin@deploy.hub</code> / <code className="px-1 py-0.5 bg-secondary rounded">admin</code>
-            </p>
-          </div>
         </div>
 
-        {/* Server Info */}
         <div className="mt-6 text-center">
           <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
             <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
-            <span>Connected to</span>
+            <span>Conectado a</span>
             <span className="font-mono text-foreground">62.72.9.22</span>
           </div>
         </div>

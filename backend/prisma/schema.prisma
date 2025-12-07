@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./deployhub.db"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model App {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  type        String    // nestjs, nextjs, vitejs
+  port        Int       @unique
+  domain      String?
+  repository  String
+  branch      String    @default("main")
+  status      String    @default("stopped") // running, stopped, error, deploying
+  currentPath String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deploys     Deploy[]
+  webhookSecret String?
+}
+
+model Deploy {
+  id          String   @id @default(uuid())
+  appId       String
+  app         App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+  version     String   // timestamp format: 2025-12-06_14-30-22
+  commitHash  String?
+  commitMessage String?
+  path        String   // full path to release
+  status      String   @default("pending") // pending, building, success, failed
+  isCurrent   Boolean  @default(false)
+  logs        String?  @db.Text
+  createdAt   DateTime @default(now())
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String   // info, warn, error, debug
+  message   String
+  source    String?
+  appId     String?
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+}
