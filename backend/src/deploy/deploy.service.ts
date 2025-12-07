@@ -18,9 +18,31 @@ export class DeployService {
     private deployGateway: DeployGateway,
   ) {}
 
-  private log(appName: string, message: string) {
+  // Store logs per deploy for persistence
+  private deployLogs: Map<string, string[]> = new Map();
+
+  private log(appName: string, message: string, deployId?: string) {
     console.log(`[${appName}] ${message}`);
     this.deployGateway.emitDeployLog(appName, message);
+    
+    // Accumulate logs for persistence
+    if (deployId) {
+      if (!this.deployLogs.has(deployId)) {
+        this.deployLogs.set(deployId, []);
+      }
+      this.deployLogs.get(deployId)!.push(`[${new Date().toISOString()}] ${message}`);
+    }
+  }
+
+  private async persistLogs(deployId: string) {
+    const logs = this.deployLogs.get(deployId);
+    if (logs && logs.length > 0) {
+      await this.prisma.deploy.update({
+        where: { id: deployId },
+        data: { logs: logs.join('\n') },
+      });
+      this.deployLogs.delete(deployId);
+    }
   }
 
   async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; envVars?: string; generateSSL?: boolean }) {
@@ -36,6 +58,17 @@ export class DeployService {
       app = await this.appsService.create(data as any);
     }
 
+    // Store envVars and installCommand in app for future redeploys
+    if (data.envVars || data.installCommand) {
+      app = await this.prisma.app.update({
+        where: { id: app.id },
+        data: {
+          envVars: data.envVars || app.envVars,
+          installCommand: data.installCommand || app.installCommand,
+        },
+      });
+    }
+
     // Pass extra deploy options
     return this.executeDeploy(app, {
       installCommand: data.installCommand,
@@ -48,17 +81,31 @@ export class DeployService {
     const app = await this.prisma.app.findUnique({ where: { id: appId } });
     if (!app) throw new BadRequestException('App não encontrado');
 
-    return this.executeDeploy(app, {});
+    // Use stored envVars and installCommand from the app
+    return this.executeDeploy(app, {
+      envVars: app.envVars || undefined,
+      installCommand: app.installCommand || undefined,
+    });
   }
 
-  private async runCommand(command: string, cwd: string, appName: string): Promise<string> {
+  private async runCommand(
+    command: string, 
+    cwd: string, 
+    appName: string, 
+    deployId?: string,
+    extraEnv?: Record<string, string>
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
-      this.log(appName, `$ ${command}`);
+      this.log(appName, `$ ${command}`, deployId);
       
       const proc = spawn(command, [], { 
         cwd, 
         shell: true,
-        env: { ...process.env, FORCE_COLOR: '0' }
+        env: { 
+          ...process.env, 
+          FORCE_COLOR: '0',
+          ...extraEnv 
+        }
       });
       
       let output = '';
@@ -73,7 +120,7 @@ export class DeployService {
         const lines = text.split('\n');
         lines.forEach((line: string) => {
           if (line.trim() || line === '') {
-            this.log(appName, `  │ ${line}`);
+            this.log(appName, `  │ ${line}`, deployId);
           }
         });
       });
@@ -89,18 +136,18 @@ export class DeployService {
           if (line.trim() || line === '') {
             // Color code warnings and errors
             if (line.toLowerCase().includes('error')) {
-              this.log(appName, `  │ ❌ ${line}`);
+              this.log(appName, `  │ ❌ ${line}`, deployId);
             } else if (line.toLowerCase().includes('warn')) {
-              this.log(appName, `  │ ⚠️ ${line}`);
+              this.log(appName, `  │ ⚠️ ${line}`, deployId);
             } else {
-              this.log(appName, `  │ ${line}`);
+              this.log(appName, `  │ ${line}`, deployId);
             }
           }
         });
       });
 
       proc.on('close', (code) => {
-        this.log(appName, `  └─ Exit code: ${code}`);
+        this.log(appName, `  └─ Exit code: ${code}`, deployId);
         if (code === 0) {
           resolve(output);
         } else {
@@ -109,10 +156,39 @@ export class DeployService {
       });
 
       proc.on('error', (err) => {
-        this.log(appName, `  └─ Error: ${err.message}`);
+        this.log(appName, `  └─ Error: ${err.message}`, deployId);
         reject(err);
       });
     });
+  }
+
+  /**
+   * Parse env vars string to object for use in commands
+   */
+  private parseEnvVars(envVars?: string): Record<string, string> {
+    if (!envVars) return {};
+    
+    const envObj: Record<string, string> = {};
+    const lines = envVars.split('\n');
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      
+      const eqIndex = trimmed.indexOf('=');
+      if (eqIndex > 0) {
+        const key = trimmed.substring(0, eqIndex).trim();
+        let value = trimmed.substring(eqIndex + 1).trim();
+        // Remove quotes if present
+        if ((value.startsWith('"') && value.endsWith('"')) || 
+            (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        envObj[key] = value;
+      }
+    }
+    
+    return envObj;
   }
 
   private async executeDeploy(app: any, options: { installCommand?: string; envVars?: string; generateSSL?: boolean } = {}) {
@@ -120,10 +196,10 @@ export class DeployService {
     const releaseDir = path.join(APPS_DIR, app.name, 'releases', timestamp);
     const currentLink = path.join(APPS_DIR, app.name, 'current');
 
-    this.log(app.name, '▶ Starting deploy...');
-    this.log(app.name, `  Version: ${timestamp}`);
+    // Parse env vars for use in commands
+    const envVarsObj = this.parseEnvVars(options.envVars);
 
-    // Create deploy record
+    // Create deploy record first to get ID for logging
     const deploy = await this.prisma.deploy.create({
       data: {
         appId: app.id,
@@ -132,6 +208,13 @@ export class DeployService {
         status: 'building',
       },
     });
+
+    this.log(app.name, '▶ Starting deploy...', deploy.id);
+    this.log(app.name, `  Version: ${timestamp}`, deploy.id);
+    
+    if (options.envVars) {
+      this.log(app.name, `  Environment variables: ${Object.keys(envVarsObj).length} defined`, deploy.id);
+    }
 
     // Update app status
     await this.prisma.app.update({
@@ -144,17 +227,17 @@ export class DeployService {
       await fs.promises.mkdir(path.join(APPS_DIR, app.name, 'releases'), { recursive: true });
 
       // Clone repository
-      this.log(app.name, '▶ Cloning repository...');
-      this.log(app.name, `  ${app.repository}`);
-      this.log(app.name, `  Branch: ${app.branch}`);
+      this.log(app.name, '▶ Cloning repository...', deploy.id);
+      this.log(app.name, `  ${app.repository}`, deploy.id);
+      this.log(app.name, `  Branch: ${app.branch}`, deploy.id);
       await execAsync(`git clone --depth 1 --branch ${app.branch} ${app.repository} ${releaseDir}`);
-      this.log(app.name, '✓ Repository cloned');
+      this.log(app.name, '✓ Repository cloned', deploy.id);
 
       // Get commit info
       const { stdout: commitHash } = await execAsync(`cd ${releaseDir} && git rev-parse --short HEAD`);
       const { stdout: commitMessage } = await execAsync(`cd ${releaseDir} && git log -1 --pretty=%s`);
 
-      this.log(app.name, `  Commit: ${commitHash.trim()} - ${commitMessage.trim().substring(0, 50)}`);
+      this.log(app.name, `  Commit: ${commitHash.trim()} - ${commitMessage.trim().substring(0, 50)}`, deploy.id);
 
       await this.prisma.deploy.update({
         where: { id: deploy.id },
@@ -163,93 +246,100 @@ export class DeployService {
 
       // Write .env file if provided
       if (options.envVars) {
-        this.log(app.name, '▶ Writing environment variables...');
+        this.log(app.name, '▶ Writing environment variables...', deploy.id);
         const envPath = path.join(releaseDir, '.env');
         await fs.promises.writeFile(envPath, options.envVars);
-        this.log(app.name, '✓ Environment file created');
+        this.log(app.name, '✓ Environment file created', deploy.id);
       }
 
-      // Install dependencies with auto-recovery
-      this.log(app.name, '▶ Installing dependencies...');
-      await this.installDependencies(releaseDir, app.name, options.installCommand);
-      this.log(app.name, '✓ Dependencies installed');
+      // Install dependencies with auto-recovery (pass env vars)
+      this.log(app.name, '▶ Installing dependencies...', deploy.id);
+      await this.installDependencies(releaseDir, app.name, options.installCommand, deploy.id, envVarsObj);
+      this.log(app.name, '✓ Dependencies installed', deploy.id);
 
-      // Check for Prisma
+      // Check for Prisma - pass env vars for DATABASE_URL etc.
       const hasPrisma = fs.existsSync(path.join(releaseDir, 'prisma', 'schema.prisma'));
       if (hasPrisma) {
-        this.log(app.name, '▶ Generating Prisma client...');
-        await this.runCommand('npx prisma generate', releaseDir, app.name);
-        this.log(app.name, '✓ Prisma client generated');
+        this.log(app.name, '▶ Generating Prisma client...', deploy.id);
+        await this.runCommand('npx prisma generate', releaseDir, app.name, deploy.id, envVarsObj);
+        this.log(app.name, '✓ Prisma client generated', deploy.id);
 
-        // Run migrations if available
-        this.log(app.name, '▶ Running Prisma migrations...');
+        // Run migrations if available - pass env vars for DATABASE_URL
+        this.log(app.name, '▶ Running Prisma migrations...', deploy.id);
         try {
-          await this.runCommand('npx prisma migrate deploy', releaseDir, app.name);
-          this.log(app.name, '✓ Migrations applied');
+          await this.runCommand('npx prisma migrate deploy', releaseDir, app.name, deploy.id, envVarsObj);
+          this.log(app.name, '✓ Migrations applied', deploy.id);
         } catch (e) {
-          this.log(app.name, '  ⚠ No migrations to apply or error');
+          this.log(app.name, '  ⚠ No migrations to apply or error', deploy.id);
         }
       }
 
-      // Build based on type
-      this.log(app.name, `▶ Building ${app.type} application...`);
-      await this.runCommand('npm run build', releaseDir, app.name);
-      this.log(app.name, '✓ Build completed');
+      // Build based on type - pass env vars for build-time variables
+      this.log(app.name, `▶ Building ${app.type} application...`, deploy.id);
+      await this.runCommand('npm run build', releaseDir, app.name, deploy.id, envVarsObj);
+      this.log(app.name, '✓ Build completed', deploy.id);
 
       // Update symlink
-      this.log(app.name, '▶ Updating symlink...');
+      this.log(app.name, '▶ Updating symlink...', deploy.id);
       await execAsync(`rm -f ${currentLink} && ln -s ${releaseDir} ${currentLink}`);
-      this.log(app.name, `✓ ${currentLink} → ${releaseDir}`);
+      this.log(app.name, `✓ ${currentLink} → ${releaseDir}`, deploy.id);
 
-      // Start/restart PM2 (not for static)
+      // Start/restart PM2 (not for static) - include env vars in PM2 config
       if (app.type !== 'vitejs') {
-        this.log(app.name, '▶ Starting PM2 process...');
-        const pm2Config = this.generatePM2Config(app, currentLink);
+        this.log(app.name, '▶ Starting PM2 process...', deploy.id);
+        const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj);
         const configPath = path.join(APPS_DIR, app.name, 'ecosystem.config.js');
         await fs.promises.writeFile(configPath, pm2Config);
 
         try {
           await execAsync(`pm2 delete ${app.name}`);
-          this.log(app.name, '  Stopped existing process');
+          this.log(app.name, '  Stopped existing process', deploy.id);
         } catch {}
 
         await execAsync(`pm2 start ${configPath}`);
         await execAsync('pm2 save');
-        this.log(app.name, `✓ PM2 process started on port ${app.port}`);
+        this.log(app.name, `✓ PM2 process started on port ${app.port}`, deploy.id);
       } else {
-        this.log(app.name, '  Static app - no PM2 process needed');
+        this.log(app.name, '  Static app - no PM2 process needed', deploy.id);
       }
 
       // Update Nginx
-      this.log(app.name, '▶ Configuring Nginx...');
+      this.log(app.name, '▶ Configuring Nginx...', deploy.id);
       await this.updateNginxConfig(app);
-      this.log(app.name, `✓ Nginx configured${app.domain ? ` for ${app.domain}` : ''}`);
+      this.log(app.name, `✓ Nginx configured${app.domain ? ` for ${app.domain}` : ''}`, deploy.id);
 
       // Generate SSL certificate with Certbot if requested
       if (options.generateSSL && app.domain) {
-        this.log(app.name, '▶ Checking Certbot installation...');
+        this.log(app.name, '▶ Checking Certbot installation...', deploy.id);
         try {
           await execAsync('which certbot');
-          this.log(app.name, '✓ Certbot is installed');
+          this.log(app.name, '✓ Certbot is installed', deploy.id);
           
-          this.log(app.name, '▶ Generating SSL certificate with Certbot...');
-          await this.runCommand(`sudo certbot --nginx -d ${app.domain} --non-interactive --agree-tos --email admin@${app.domain}`, '/tmp', app.name);
-          this.log(app.name, `✓ SSL certificate generated for ${app.domain}`);
+          this.log(app.name, '▶ Generating SSL certificate with Certbot...', deploy.id);
+          await this.runCommand(`sudo certbot --nginx -d ${app.domain} --non-interactive --agree-tos --email admin@${app.domain}`, '/tmp', app.name, deploy.id);
+          this.log(app.name, `✓ SSL certificate generated for ${app.domain}`, deploy.id);
         } catch (e) {
           if (e.message?.includes('which certbot')) {
-            this.log(app.name, '  ❌ Certbot is not installed');
-            this.log(app.name, '  To install: sudo apt install certbot python3-certbot-nginx');
+            this.log(app.name, '  ❌ Certbot is not installed', deploy.id);
+            this.log(app.name, '  To install: sudo apt install certbot python3-certbot-nginx', deploy.id);
           } else {
-            this.log(app.name, `  ⚠️ Failed to generate SSL: ${e.message}`);
-            this.log(app.name, '  You can manually run: sudo certbot --nginx -d ' + app.domain);
+            this.log(app.name, `  ⚠️ Failed to generate SSL: ${e.message}`, deploy.id);
+            this.log(app.name, '  You can manually run: sudo certbot --nginx -d ' + app.domain, deploy.id);
           }
         }
       } else if (options.generateSSL && !app.domain) {
-        this.log(app.name, '  ⚠️ SSL generation skipped - no domain configured');
+        this.log(app.name, '  ⚠️ SSL generation skipped - no domain configured', deploy.id);
       }
 
-      // Mark deploy as success
+      // Mark deploy as success and persist logs
       await this.prisma.deploy.updateMany({ where: { appId: app.id }, data: { isCurrent: false } });
+
+      this.log(app.name, '', deploy.id);
+      this.log(app.name, '🚀 Deploy completed successfully!', deploy.id);
+
+      // Persist all accumulated logs
+      await this.persistLogs(deploy.id);
+
       await this.prisma.deploy.update({
         where: { id: deploy.id },
         data: { status: 'success', isCurrent: true },
@@ -260,7 +350,7 @@ export class DeployService {
         data: { status: 'running', currentPath: releaseDir },
       });
 
-      // Log success
+      // Log success to system logs
       await this.prisma.systemLog.create({
         data: {
           level: 'info',
@@ -270,21 +360,22 @@ export class DeployService {
         },
       });
 
-      this.log(app.name, '');
-      this.log(app.name, '🚀 Deploy completed successfully!');
       this.deployGateway.emitDeployComplete(app.name, true, { version: timestamp, deploy });
 
       return { success: true, version: timestamp, deploy };
     } catch (error) {
       const errorMessage = error.message || 'Unknown error';
       
-      this.log(app.name, '');
-      this.log(app.name, `❌ Deploy failed: ${errorMessage}`);
+      this.log(app.name, '', deploy.id);
+      this.log(app.name, `❌ Deploy failed: ${errorMessage}`, deploy.id);
       
+      // Persist all accumulated logs before marking as failed
+      await this.persistLogs(deploy.id);
+
       // Mark deploy as failed
       await this.prisma.deploy.update({
         where: { id: deploy.id },
-        data: { status: 'failed', logs: errorMessage },
+        data: { status: 'failed' },
       });
 
       await this.prisma.app.update({
@@ -326,15 +417,40 @@ export class DeployService {
     });
   }
 
+  async getDeployLogs(deployId: string) {
+    const deploy = await this.prisma.deploy.findUnique({
+      where: { id: deployId },
+      select: { id: true, version: true, status: true, logs: true, createdAt: true },
+    });
+    
+    if (!deploy) {
+      throw new BadRequestException('Deploy não encontrado');
+    }
+    
+    return {
+      id: deploy.id,
+      version: deploy.version,
+      status: deploy.status,
+      logs: deploy.logs || 'No logs available for this deploy.',
+      createdAt: deploy.createdAt,
+    };
+  }
+
   /**
    * Auto-diagnóstico de instalação de dependências
    * Tenta npm ci, se falhar por lock file desatualizado, usa npm install
    */
-  private async installDependencies(cwd: string, appName: string, customCommand?: string): Promise<void> {
+  private async installDependencies(
+    cwd: string, 
+    appName: string, 
+    customCommand?: string, 
+    deployId?: string,
+    envVars?: Record<string, string>
+  ): Promise<void> {
     // Se tem comando customizado, usa diretamente
     if (customCommand) {
-      this.log(appName, `  Command: ${customCommand}`);
-      await this.runCommand(customCommand, cwd, appName);
+      this.log(appName, `  Command: ${customCommand}`, deployId);
+      await this.runCommand(customCommand, cwd, appName, deployId, envVars);
       return;
     }
 
@@ -342,16 +458,16 @@ export class DeployService {
     const hasLockFile = fs.existsSync(path.join(cwd, 'package-lock.json'));
     
     if (!hasLockFile) {
-      this.log(appName, '  ⚠️ No package-lock.json found, using npm install');
-      this.log(appName, '  Command: npm install');
-      await this.runCommand('npm install', cwd, appName);
+      this.log(appName, '  ⚠️ No package-lock.json found, using npm install', deployId);
+      this.log(appName, '  Command: npm install', deployId);
+      await this.runCommand('npm install', cwd, appName, deployId, envVars);
       return;
     }
 
     // Tenta npm ci primeiro (mais rápido e confiável)
     try {
-      this.log(appName, '  Command: npm ci --prefer-offline');
-      await this.runCommand('npm ci --prefer-offline', cwd, appName);
+      this.log(appName, '  Command: npm ci --prefer-offline', deployId);
+      await this.runCommand('npm ci --prefer-offline', cwd, appName, deployId, envVars);
     } catch (error) {
       const errorMsg = error.message || '';
       
@@ -360,14 +476,14 @@ export class DeployService {
           errorMsg.includes('package.json and package-lock.json') ||
           errorMsg.includes('Missing:') ||
           errorMsg.includes('out of sync')) {
-        this.log(appName, '');
-        this.log(appName, '  🔧 Auto-diagnóstico: Lock file desatualizado detectado');
-        this.log(appName, '  ⚡ Fallback: Usando npm install para sincronizar...');
-        this.log(appName, '  Command: npm install');
+        this.log(appName, '', deployId);
+        this.log(appName, '  🔧 Auto-diagnóstico: Lock file desatualizado detectado', deployId);
+        this.log(appName, '  ⚡ Fallback: Usando npm install para sincronizar...', deployId);
+        this.log(appName, '  Command: npm install', deployId);
         
-        await this.runCommand('npm install', cwd, appName);
+        await this.runCommand('npm install', cwd, appName, deployId, envVars);
         
-        this.log(appName, '  ✓ Dependências sincronizadas via npm install');
+        this.log(appName, '  ✓ Dependências sincronizadas via npm install', deployId);
       } else {
         // Outro tipo de erro, repassa
         throw error;
@@ -375,9 +491,25 @@ export class DeployService {
     }
   }
 
-  private generatePM2Config(app: any, currentPath: string): string {
+  private generatePM2Config(app: any, currentPath: string, envVars?: Record<string, string>): string {
     const isSupported = ['nestjs', 'nextjs'].includes(app.type);
     if (!isSupported) return '';
+
+    // Merge base env with user-provided env vars
+    const baseEnv = {
+      NODE_ENV: 'production',
+      PORT: app.port,
+    };
+    const mergedEnv = { ...baseEnv, ...envVars };
+    
+    // Convert env object to JS object string
+    const envString = Object.entries(mergedEnv)
+      .map(([key, value]) => {
+        // Quote string values, leave numbers as-is
+        const formattedValue = typeof value === 'number' ? value : `'${String(value).replace(/'/g, "\\'")}'`;
+        return `      ${key}: ${formattedValue}`;
+      })
+      .join(',\n');
 
     // Para Next.js, usa comando direto para garantir que a porta configurada prevalece
     // sobre qualquer --port hardcoded no package.json
@@ -395,8 +527,7 @@ module.exports = {
     watch: false,
     max_memory_restart: '1G',
     env: {
-      NODE_ENV: 'production',
-      PORT: ${app.port}
+${envString}
     }
   }]
 };
@@ -417,8 +548,7 @@ module.exports = {
     watch: false,
     max_memory_restart: '1G',
     env: {
-      NODE_ENV: 'production',
-      PORT: ${app.port}
+${envString}
     }
   }]
 };

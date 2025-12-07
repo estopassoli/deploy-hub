@@ -154,6 +154,10 @@ class ApiClient {
     return this.request<any[]>('/deploy/history');
   }
 
+  async getDeployLogs(deployId: string) {
+    return this.request<{ id: string; version: string; status: string; logs: string; createdAt: string }>(`/deploy/${deployId}/logs`);
+  }
+
   // Logs
   async getSystemLogs(options?: { level?: string; appId?: string; limit?: number }) {
     const params = new URLSearchParams();

@@ -68,4 +68,10 @@ export class DeployController {
   async getHistory() {
     return this.deployService.getDeployHistory();
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':deployId/logs')
+  async getDeployLogs(@Param('deployId') deployId: string) {
+    return this.deployService.getDeployLogs(deployId);
+  }
 }
