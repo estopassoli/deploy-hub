@@ -24,6 +24,11 @@ export class DeployService {
   }
 
   async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string }) {
+    // Validate required fields
+    if (!data.name || !data.repository || !data.port || !data.type) {
+      throw new BadRequestException('Missing required fields: name, repository, port, type');
+    }
+
     // Create app if not exists
     let app = await this.prisma.app.findUnique({ where: { name: data.name } });
     
