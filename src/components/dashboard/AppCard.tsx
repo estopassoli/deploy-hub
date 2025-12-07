@@ -198,11 +198,16 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
 
   const handleSaveEnvVars = async () => {
     setIsSavingEnvVars(true);
+    const payload = { envVars, installCommand, buildCommand, migrateCommand, startCommand };
+    console.log('[AppCard] Saving config for app:', app.id, payload);
     try {
-      await api.updateApp(app.id, { envVars, installCommand, buildCommand, migrateCommand, startCommand });
+      const result = await api.updateApp(app.id, payload);
+      console.log('[AppCard] Save result:', result);
       toast.success('Configuration saved! Changes will apply on next deploy.');
       setShowEnvVarsModal(false);
+      onRefresh?.(); // Refresh to show updated data
     } catch (error: any) {
+      console.error('[AppCard] Save error:', error);
       toast.error(error.message || 'Failed to save');
     } finally {
       setIsSavingEnvVars(false);
