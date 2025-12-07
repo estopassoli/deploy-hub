@@ -316,14 +316,30 @@ module.exports = {
       ? this.generateStaticNginxConfig(app)
       : this.generateProxyNginxConfig(app);
 
-    const configPath = `/etc/nginx/sites-enabled/${app.name}.conf`;
-    await fs.promises.writeFile(configPath, config);
-    await execAsync('nginx -t && nginx -s reload');
+    const configPath = `/etc/nginx/sites-available/${app.name}.conf`;
+    const enabledPath = `/etc/nginx/sites-enabled/${app.name}.conf`;
+    
+    // Write config to sites-available first
+    const tempPath = `/tmp/${app.name}.nginx.conf`;
+    await fs.promises.writeFile(tempPath, config);
+    this.log(app.name, `  Writing config to ${configPath}`);
+    
+    // Move to sites-available with sudo
+    await execAsync(`sudo mv ${tempPath} ${configPath}`);
+    
+    // Create symlink in sites-enabled
+    await execAsync(`sudo rm -f ${enabledPath}`);
+    await execAsync(`sudo ln -s ${configPath} ${enabledPath}`);
+    this.log(app.name, `  Symlink created: ${enabledPath}`);
+    
+    // Test and reload nginx
+    await execAsync('sudo nginx -t');
+    this.log(app.name, '  Nginx config test passed');
+    await execAsync('sudo systemctl reload nginx');
   }
 
   private generateProxyNginxConfig(app: any): string {
-    return `
-server {
+    return `server {
     listen 80;
     server_name ${app.domain || '_'};
 
@@ -337,14 +353,14 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 86400;
     }
 }
 `;
   }
 
   private generateStaticNginxConfig(app: any): string {
-    return `
-server {
+    return `server {
     listen 80;
     server_name ${app.domain || '_'};
     root ${APPS_DIR}/${app.name}/current/dist;
@@ -358,6 +374,9 @@ server {
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
 }
 `;
   }
