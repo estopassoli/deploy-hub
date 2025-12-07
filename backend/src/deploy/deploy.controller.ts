@@ -1,13 +1,30 @@
 import { Controller, Post, Body, Param, UseGuards, Get } from '@nestjs/common';
+import { IsString, IsNumber, IsOptional, IsIn } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { DeployService } from './deploy.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 class DeployDto {
+  @IsString()
   repository: string;
+
+  @IsString()
   name: string;
+
+  @IsNumber()
+  @Transform(({ value }) => parseInt(value, 10))
   port: number;
+
+  @IsOptional()
+  @IsString()
   domain?: string;
+
+  @IsString()
+  @IsIn(['nestjs', 'nextjs', 'vitejs'])
   type: 'nestjs' | 'nextjs' | 'vitejs';
+
+  @IsOptional()
+  @IsString()
   branch?: string;
 }
 
