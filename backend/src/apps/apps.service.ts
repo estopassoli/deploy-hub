@@ -120,42 +120,56 @@ export class AppsService {
   }
 
   async delete(id: string) {
+    console.log('[AppsService] Delete requested for id:', id);
+    
     const app = await this.prisma.app.findUnique({ where: { id } });
-    if (!app) throw new NotFoundException('App não encontrado');
+    if (!app) {
+      console.log('[AppsService] App not found:', id);
+      throw new NotFoundException('App não encontrado');
+    }
+
+    console.log('[AppsService] Deleting app:', app.name);
 
     // Stop PM2 process
     try {
+      console.log('[AppsService] Stopping PM2 process:', app.name);
       await execAsync(`pm2 delete ${app.name}`);
       await execAsync('pm2 save');
     } catch (e) {
-      // Process might not exist
+      console.log('[AppsService] PM2 delete error (may not exist):', e.message);
     }
 
     // Remove Nginx config
     try {
+      console.log('[AppsService] Removing Nginx config:', app.name);
       await execAsync(`sudo rm -f /etc/nginx/sites-available/${app.name}.conf`);
       await execAsync(`sudo rm -f /etc/nginx/sites-enabled/${app.name}.conf`);
       await execAsync('sudo systemctl reload nginx');
     } catch (e) {
-      // Config might not exist
+      console.log('[AppsService] Nginx remove error:', e.message);
     }
 
     // Remove app directory from ~/apps
     try {
       const appDir = path.join(APPS_DIR, app.name);
+      console.log('[AppsService] Removing app directory:', appDir);
       await execAsync(`rm -rf ${appDir}`);
     } catch (e) {
-      // Directory might not exist
+      console.log('[AppsService] App directory remove error:', e.message);
     }
 
     // Remove /var/www/{app_name} directory (for static apps)
     try {
+      console.log('[AppsService] Removing /var/www/' + app.name);
       await execAsync(`sudo rm -rf /var/www/${app.name}`);
     } catch (e) {
-      // Directory might not exist
+      console.log('[AppsService] /var/www remove error:', e.message);
     }
 
+    console.log('[AppsService] Deleting from database:', id);
     await this.prisma.app.delete({ where: { id } });
+    
+    console.log('[AppsService] Delete completed successfully');
     return { success: true };
   }
 
