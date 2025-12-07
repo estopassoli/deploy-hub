@@ -77,6 +77,9 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
   const [showEnvVarsModal, setShowEnvVarsModal] = useState(false);
   const [envVars, setEnvVars] = useState('');
   const [installCommand, setInstallCommand] = useState('');
+  const [buildCommand, setBuildCommand] = useState('');
+  const [migrateCommand, setMigrateCommand] = useState('');
+  const [startCommand, setStartCommand] = useState('');
   const [isSavingEnvVars, setIsSavingEnvVars] = useState(false);
   const [isLoadingEnvVars, setIsLoadingEnvVars] = useState(false);
   const [deployLogs, setDeployLogs] = useState<string[]>([]);
@@ -180,11 +183,14 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
     setShowEnvVarsModal(true);
     setIsLoadingEnvVars(true);
     try {
-      const data = await api.getAppEnvVars(app.id);
+      const data = await api.getAppConfig(app.id);
       setEnvVars(data.envVars);
       setInstallCommand(data.installCommand);
+      setBuildCommand(data.buildCommand);
+      setMigrateCommand(data.migrateCommand);
+      setStartCommand(data.startCommand);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to load env vars');
+      toast.error(error.message || 'Failed to load configuration');
     } finally {
       setIsLoadingEnvVars(false);
     }
@@ -193,8 +199,8 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
   const handleSaveEnvVars = async () => {
     setIsSavingEnvVars(true);
     try {
-      await api.updateApp(app.id, { envVars, installCommand });
-      toast.success('Environment variables saved! Changes will apply on next deploy.');
+      await api.updateApp(app.id, { envVars, installCommand, buildCommand, migrateCommand, startCommand });
+      toast.success('Configuration saved! Changes will apply on next deploy.');
       setShowEnvVarsModal(false);
     } catch (error: any) {
       toast.error(error.message || 'Failed to save');
@@ -416,16 +422,16 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Environment Variables Modal */}
+      {/* Configuration Modal */}
       <Dialog open={showEnvVarsModal} onOpenChange={setShowEnvVarsModal}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Settings className="h-5 w-5" />
-              Environment Variables - {app.name}
+              Configurações - {app.name}
             </DialogTitle>
             <DialogDescription>
-              Configure environment variables and custom install command. Changes apply on next deploy.
+              Configure variáveis de ambiente e comandos customizados. Alterações serão aplicadas no próximo deploy.
             </DialogDescription>
           </DialogHeader>
           
@@ -436,29 +442,68 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
           ) : (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="envVars">Environment Variables (.env format)</Label>
+                <Label htmlFor="envVars">Variáveis de Ambiente (.env)</Label>
                 <Textarea
                   id="envVars"
                   placeholder="DATABASE_URL=postgres://...&#10;API_KEY=your_api_key&#10;NODE_ENV=production"
                   value={envVars}
                   onChange={(e) => setEnvVars(e.target.value)}
-                  className="min-h-[200px] font-mono text-sm"
+                  className="min-h-[150px] font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
-                  One variable per line in KEY=VALUE format. These will be available during build and runtime.
+                  Uma variável por linha no formato KEY=VALUE. Disponíveis durante build e runtime.
                 </p>
               </div>
               
-              <div className="space-y-2">
-                <Label htmlFor="installCommand">Custom Install Command (optional)</Label>
-                <Input
-                  id="installCommand"
-                  placeholder="npm install (default)"
-                  value={installCommand}
-                  onChange={(e) => setInstallCommand(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Leave empty to use automatic detection (npm ci or npm install).
+              <div className="border-t border-border pt-4">
+                <h4 className="text-sm font-medium mb-3">Comandos Customizados (opcional)</h4>
+                <div className="grid gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="installCommand" className="text-xs">Comando de Install</Label>
+                    <Input
+                      id="installCommand"
+                      placeholder="npm ci (padrão automático)"
+                      value={installCommand}
+                      onChange={(e) => setInstallCommand(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  
+                  <div className="space-y-1.5">
+                    <Label htmlFor="buildCommand" className="text-xs">Comando de Build</Label>
+                    <Input
+                      id="buildCommand"
+                      placeholder="npm run build (padrão)"
+                      value={buildCommand}
+                      onChange={(e) => setBuildCommand(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  
+                  <div className="space-y-1.5">
+                    <Label htmlFor="migrateCommand" className="text-xs">Comando de Migrate</Label>
+                    <Input
+                      id="migrateCommand"
+                      placeholder="npx prisma migrate deploy (padrão para Prisma)"
+                      value={migrateCommand}
+                      onChange={(e) => setMigrateCommand(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  
+                  <div className="space-y-1.5">
+                    <Label htmlFor="startCommand" className="text-xs">Comando de Start</Label>
+                    <Input
+                      id="startCommand"
+                      placeholder="npm run start (padrão)"
+                      value={startCommand}
+                      onChange={(e) => setStartCommand(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Deixe em branco para usar os comandos padrão de cada etapa.
                 </p>
               </div>
             </div>
@@ -466,18 +511,18 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEnvVarsModal(false)}>
-              Cancel
+              Cancelar
             </Button>
             <Button onClick={handleSaveEnvVars} disabled={isSavingEnvVars || isLoadingEnvVars}>
               {isSavingEnvVars ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Saving...
+                  Salvando...
                 </>
               ) : (
                 <>
                   <Save className="h-4 w-4 mr-2" />
-                  Save Changes
+                  Salvar
                 </>
               )}
             </Button>

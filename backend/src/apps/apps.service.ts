@@ -85,7 +85,7 @@ export class AppsService {
     return app;
   }
 
-  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string }) {
+  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string }) {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
@@ -94,6 +94,9 @@ export class AppsService {
     if (data.branch !== undefined) updateData.branch = data.branch;
     if (data.envVars !== undefined) updateData.envVars = data.envVars;
     if (data.installCommand !== undefined) updateData.installCommand = data.installCommand;
+    if (data.buildCommand !== undefined) updateData.buildCommand = data.buildCommand;
+    if (data.migrateCommand !== undefined) updateData.migrateCommand = data.migrateCommand;
+    if (data.startCommand !== undefined) updateData.startCommand = data.startCommand;
 
     const updated = await this.prisma.app.update({
       where: { id },

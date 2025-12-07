@@ -45,7 +45,7 @@ export class DeployService {
     }
   }
 
-  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; envVars?: string; generateSSL?: boolean }) {
+  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; envVars?: string; generateSSL?: boolean }) {
     // Validate required fields
     if (!data.name || !data.repository || !data.port || !data.type) {
       throw new BadRequestException('Missing required fields: name, repository, port, type');
@@ -58,13 +58,16 @@ export class DeployService {
       app = await this.appsService.create(data as any);
     }
 
-    // Store envVars and installCommand in app for future redeploys
-    if (data.envVars || data.installCommand) {
+    // Store envVars and commands in app for future redeploys
+    if (data.envVars || data.installCommand || data.buildCommand || data.migrateCommand || data.startCommand) {
       app = await this.prisma.app.update({
         where: { id: app.id },
         data: {
-          envVars: data.envVars || app.envVars,
-          installCommand: data.installCommand || app.installCommand,
+          envVars: data.envVars ?? app.envVars,
+          installCommand: data.installCommand ?? app.installCommand,
+          buildCommand: data.buildCommand ?? app.buildCommand,
+          migrateCommand: data.migrateCommand ?? app.migrateCommand,
+          startCommand: data.startCommand ?? app.startCommand,
         },
       });
     }
@@ -72,6 +75,9 @@ export class DeployService {
     // Pass extra deploy options
     return this.executeDeploy(app, {
       installCommand: data.installCommand,
+      buildCommand: data.buildCommand,
+      migrateCommand: data.migrateCommand,
+      startCommand: data.startCommand,
       envVars: data.envVars,
       generateSSL: data.generateSSL,
     });
@@ -81,10 +87,13 @@ export class DeployService {
     const app = await this.prisma.app.findUnique({ where: { id: appId } });
     if (!app) throw new BadRequestException('App não encontrado');
 
-    // Use stored envVars and installCommand from the app
+    // Use stored envVars and commands from the app
     return this.executeDeploy(app, {
       envVars: app.envVars || undefined,
       installCommand: app.installCommand || undefined,
+      buildCommand: app.buildCommand || undefined,
+      migrateCommand: app.migrateCommand || undefined,
+      startCommand: app.startCommand || undefined,
     });
   }
 
@@ -191,7 +200,7 @@ export class DeployService {
     return envObj;
   }
 
-  private async executeDeploy(app: any, options: { installCommand?: string; envVars?: string; generateSSL?: boolean } = {}) {
+  private async executeDeploy(app: any, options: { installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; envVars?: string; generateSSL?: boolean } = {}) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
     const releaseDir = path.join(APPS_DIR, app.name, 'releases', timestamp);
     const currentLink = path.join(APPS_DIR, app.name, 'current');
@@ -257,26 +266,32 @@ export class DeployService {
       await this.installDependencies(releaseDir, app.name, options.installCommand, deploy.id, envVarsObj);
       this.log(app.name, '✓ Dependencies installed', deploy.id);
 
-      // Check for Prisma - pass env vars for DATABASE_URL etc.
+      // Check for Prisma - run migrations if custom migrate command OR prisma detected
       const hasPrisma = fs.existsSync(path.join(releaseDir, 'prisma', 'schema.prisma'));
-      if (hasPrisma) {
-        this.log(app.name, '▶ Generating Prisma client...', deploy.id);
-        await this.runCommand('npx prisma generate', releaseDir, app.name, deploy.id, envVarsObj);
-        this.log(app.name, '✓ Prisma client generated', deploy.id);
+      if (hasPrisma || options.migrateCommand) {
+        if (hasPrisma) {
+          this.log(app.name, '▶ Generating Prisma client...', deploy.id);
+          await this.runCommand('npx prisma generate', releaseDir, app.name, deploy.id, envVarsObj);
+          this.log(app.name, '✓ Prisma client generated', deploy.id);
+        }
 
-        // Run migrations if available - pass env vars for DATABASE_URL
-        this.log(app.name, '▶ Running Prisma migrations...', deploy.id);
-        try {
-          await this.runCommand('npx prisma migrate deploy', releaseDir, app.name, deploy.id, envVarsObj);
-          this.log(app.name, '✓ Migrations applied', deploy.id);
-        } catch (e) {
-          this.log(app.name, '  ⚠ No migrations to apply or error', deploy.id);
+        // Run migrations - use custom command if provided
+        const migrateCmd = options.migrateCommand || (hasPrisma ? 'npx prisma migrate deploy' : null);
+        if (migrateCmd) {
+          this.log(app.name, '▶ Running migrations...', deploy.id);
+          try {
+            await this.runCommand(migrateCmd, releaseDir, app.name, deploy.id, envVarsObj);
+            this.log(app.name, '✓ Migrations applied', deploy.id);
+          } catch (e) {
+            this.log(app.name, '  ⚠ No migrations to apply or error', deploy.id);
+          }
         }
       }
 
-      // Build based on type - pass env vars for build-time variables
+      // Build - use custom command if provided
+      const buildCmd = options.buildCommand || 'npm run build';
       this.log(app.name, `▶ Building ${app.type} application...`, deploy.id);
-      await this.runCommand('npm run build', releaseDir, app.name, deploy.id, envVarsObj);
+      await this.runCommand(buildCmd, releaseDir, app.name, deploy.id, envVarsObj);
       this.log(app.name, '✓ Build completed', deploy.id);
 
       // Update symlink
@@ -287,7 +302,7 @@ export class DeployService {
       // Start/restart PM2 (not for static) - include env vars in PM2 config
       if (app.type !== 'vitejs') {
         this.log(app.name, '▶ Starting PM2 process...', deploy.id);
-        const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj);
+        const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj, options.startCommand);
         const configPath = path.join(APPS_DIR, app.name, 'ecosystem.config.js');
         await fs.promises.writeFile(configPath, pm2Config);
 
@@ -499,7 +514,7 @@ export class DeployService {
     }
   }
 
-  private generatePM2Config(app: any, currentPath: string, envVars?: Record<string, string>): string {
+  private generatePM2Config(app: any, currentPath: string, envVars?: Record<string, string>, customStartCommand?: string): string {
     const isSupported = ['nestjs', 'nextjs'].includes(app.type);
     if (!isSupported) return '';
 
@@ -518,6 +533,33 @@ export class DeployService {
         return `      ${key}: ${formattedValue}`;
       })
       .join(',\n');
+
+    // If custom start command is provided, use it
+    if (customStartCommand) {
+      // Parse the command - could be "npm run start:prod" or "node dist/main.js" etc.
+      const parts = customStartCommand.split(' ');
+      const script = parts[0];
+      const args = parts.slice(1).join(' ');
+      
+      return `
+module.exports = {
+  apps: [{
+    name: '${app.name}',
+    cwd: '${currentPath}',
+    script: '${script}',
+    args: '${args}',
+    interpreter: 'none',
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+${envString}
+    }
+  }]
+};
+`;
+    }
 
     // Para Next.js, usa comando direto para garantir que a porta configurada prevalece
     // sobre qualquer --port hardcoded no package.json
@@ -559,6 +601,8 @@ module.exports = {
 ${envString}
     }
   }]
+};
+`;
 };
 `;
   }

@@ -16,6 +16,9 @@ class UpdateAppDto {
   branch?: string;
   envVars?: string;
   installCommand?: string;
+  buildCommand?: string;
+  migrateCommand?: string;
+  startCommand?: string;
 }
 
 @Controller('apps')

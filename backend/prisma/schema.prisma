@@ -17,21 +17,24 @@ model User {
 }
 
 model App {
-  id            String    @id @default(uuid())
-  name          String    @unique
-  type          String    // nestjs, nextjs, vitejs
-  port          Int       @unique
-  domain        String?
-  repository    String
-  branch        String    @default("main")
-  status        String    @default("stopped") // running, stopped, error, deploying
-  currentPath   String?
-  envVars       String?   // Environment variables stored for redeploy
-  installCommand String?  // Custom install command stored for redeploy
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deploys       Deploy[]
-  webhookSecret String?
+  id              String    @id @default(uuid())
+  name            String    @unique
+  type            String    // nestjs, nextjs, vitejs
+  port            Int       @unique
+  domain          String?
+  repository      String
+  branch          String    @default("main")
+  status          String    @default("stopped") // running, stopped, error, deploying
+  currentPath     String?
+  envVars         String?   // Environment variables stored for redeploy
+  installCommand  String?   // Custom install command (optional)
+  buildCommand    String?   // Custom build command (optional)
+  migrateCommand  String?   // Custom migrate command (optional)
+  startCommand    String?   // Custom start command (optional)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deploys         Deploy[]
+  webhookSecret   String?
 }
 
 model Deploy {
