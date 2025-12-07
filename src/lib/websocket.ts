@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'http://62.72.9.22:10001';
+const WS_URL = import.meta.env.VITE_WS_URL || 'https://api-panel.auraai.chat';
 
 class WebSocketClient {
   private socket: Socket | null = null;

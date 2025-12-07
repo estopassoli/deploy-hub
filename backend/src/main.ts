@@ -6,7 +6,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
   app.enableCors({
-    origin: ['http://localhost:10000', 'http://62.72.9.22:10000', 'https://deployhub.example.com'],
+    origin: ['http://localhost:10000', 'https://panel.auraai.chat', 'https://93d211da-d945-45b7-9042-69f0e628987a.lovableproject.com'],
     credentials: true,
   });
   
