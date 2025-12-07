@@ -98,4 +98,19 @@ jobs:
         run: echo "❌ Deploy failed for ${app.name}"
 `;
   }
+
+  async regenerateWebhookSecret(appId: string) {
+    const app = await this.prisma.app.findUnique({ where: { id: appId } });
+    if (!app) throw new BadRequestException('App não encontrado');
+
+    const newSecret = crypto.randomBytes(32).toString('hex');
+    
+    await this.prisma.app.update({
+      where: { id: appId },
+      data: { webhookSecret: newSecret },
+    });
+
+    return { secret: newSecret };
+  }
+  }
 }
