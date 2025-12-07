@@ -89,16 +89,22 @@ class ApiClient {
     });
   }
 
-  async updateApp(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string }) {
+  async updateApp(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string }) {
     return this.request<any>(`/apps/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   }
 
-  async getAppEnvVars(id: string) {
+  async getAppConfig(id: string) {
     const app = await this.request<any>(`/apps/${id}`);
-    return { envVars: app.envVars || '', installCommand: app.installCommand || '' };
+    return { 
+      envVars: app.envVars || '', 
+      installCommand: app.installCommand || '',
+      buildCommand: app.buildCommand || '',
+      migrateCommand: app.migrateCommand || '',
+      startCommand: app.startCommand || '',
+    };
   }
 
   async deleteApp(id: string) {
