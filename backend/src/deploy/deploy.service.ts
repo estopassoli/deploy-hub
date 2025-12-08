@@ -305,6 +305,11 @@ export class DeployService {
           missingDeps.push('@types/node');
         }
         
+        // Check for typescript
+        if (!fs.existsSync(path.join(releaseDir, 'node_modules', 'typescript'))) {
+          missingDeps.push('typescript');
+        }
+        
         if (missingDeps.length > 0) {
           this.log(app.name, `▶ Installing missing dev dependencies: ${missingDeps.join(', ')}...`, deploy.id);
           await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')}`, releaseDir, app.name, deploy.id, envVarsObj);
