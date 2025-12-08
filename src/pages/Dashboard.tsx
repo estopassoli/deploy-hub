@@ -24,6 +24,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadData = useCallback(async (showLoader = false) => {
@@ -37,6 +38,7 @@ export default function Dashboard() {
       setApps(appsData);
       setStats(statsData);
       setLogs(logsData);
+      setLastUpdated(new Date());
     } catch (error: any) {
       if (showLoader) {
         toast.error(error.message || 'Erro ao carregar dados');
@@ -143,7 +145,7 @@ export default function Dashboard() {
             <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
               {apps.map((app, index) => (
                 <div key={app.id} className={`opacity-0 animate-slide-in stagger-${Math.min(index + 1, 5)}`}>
-                  <AppCard app={app} onRefresh={loadData} />
+                  <AppCard app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
                 </div>
               ))}
             </div>
