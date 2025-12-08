@@ -491,28 +491,59 @@ export default function Deploy() {
         {/* Deploying */}
         {(step === 'deploying' || step === 'error') && (
           <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+            {/* Deploy Info Card */}
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="flex items-center gap-2 mb-3">
                 {step === 'deploying' ? (
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
                 ) : (
                   <XCircle className="h-4 w-4 text-destructive" />
                 )}
-                <span className="text-sm font-medium">
+                <span className="font-medium">
                   {step === 'deploying' ? `Deploying ${formData.name}...` : `Deploy failed: ${formData.name}`}
                 </span>
               </div>
-              <div className="h-[400px] overflow-auto bg-background p-4 font-mono text-sm terminal-scroll">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="text-muted-foreground">Repository:</div>
+                <div className="font-mono text-xs truncate">{formData.repository}</div>
+                <div className="text-muted-foreground">Type:</div>
+                <div>{formData.type}</div>
+                <div className="text-muted-foreground">Port:</div>
+                <div>{formData.port}</div>
+                <div className="text-muted-foreground">Branch:</div>
+                <div>{formData.branch}</div>
+                {formData.domain && (
+                  <>
+                    <div className="text-muted-foreground">Domain:</div>
+                    <div>{formData.domain}</div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Real-time Logs */}
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-border px-4 py-2 bg-secondary/30">
+                <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                <span className="text-sm font-medium">Build Logs</span>
+                <span className="text-xs text-muted-foreground ml-auto">
+                  {deployLogs.length} lines
+                </span>
+              </div>
+              <div className="h-[350px] overflow-auto bg-background p-4 font-mono text-xs terminal-scroll">
                 {deployLogs.map((log, index) => (
                   <div 
                     key={index} 
                     className={cn(
-                      'py-0.5',
+                      'py-0.5 whitespace-pre-wrap break-all',
                       log?.startsWith('✓') && 'text-success',
-                      log?.startsWith('▶') && 'text-primary',
+                      log?.startsWith('▶') && 'text-primary font-semibold',
                       log?.startsWith('🚀') && 'text-primary font-bold',
                       log?.startsWith('❌') && 'text-destructive font-bold',
-                      log?.startsWith('  ') && 'text-muted-foreground pl-4'
+                      log?.startsWith('$') && 'text-yellow-500',
+                      log?.includes('error') && 'text-destructive',
+                      log?.includes('warning') && 'text-yellow-500',
+                      !log?.startsWith('✓') && !log?.startsWith('▶') && !log?.startsWith('🚀') && !log?.startsWith('❌') && !log?.startsWith('$') && 'text-muted-foreground'
                     )}
                   >
                     {log || '\u00A0'}
