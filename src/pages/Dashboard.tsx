@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Server, 
   Rocket, 
@@ -17,18 +17,18 @@ import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 
+const REFRESH_INTERVAL = 5000; // 5 seconds for real-time metrics
+
 export default function Dashboard() {
   const [apps, setApps] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async (showLoader = false) => {
     try {
+      if (showLoader) setIsLoading(true);
       const [appsData, statsData, logsData] = await Promise.all([
         api.getApps(),
         api.getStats(),
@@ -38,11 +38,32 @@ export default function Dashboard() {
       setStats(statsData);
       setLogs(logsData);
     } catch (error: any) {
-      toast.error(error.message || 'Erro ao carregar dados');
+      if (showLoader) {
+        toast.error(error.message || 'Erro ao carregar dados');
+      }
+      console.error('Dashboard refresh error:', error);
     } finally {
-      setIsLoading(false);
+      if (showLoader) setIsLoading(false);
     }
-  };
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    loadData(true);
+  }, [loadData]);
+
+  // Real-time polling for metrics
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      loadData(false);
+    }, REFRESH_INTERVAL);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [loadData]);
 
   if (isLoading) {
     return (

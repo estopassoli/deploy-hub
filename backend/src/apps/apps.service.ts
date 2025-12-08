@@ -19,11 +19,26 @@ export class AppsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Enrich with PM2 status
+    // Enrich with PM2 status or static file check for Vite.js
     const enrichedApps = await Promise.all(
       apps.map(async (app) => {
-        const pm2Status = await this.getPM2Status(app.name);
         const currentDeploy = app.deploys[0];
+        
+        // For Vite.js apps, check if static files exist in /var/www
+        if (app.type === 'vitejs') {
+          const staticStatus = await this.getStaticAppStatus(app.name);
+          return {
+            ...app,
+            status: staticStatus.status,
+            uptime: staticStatus.uptime,
+            cpu: 0,
+            memory: 0,
+            currentVersion: currentDeploy?.version || '-',
+          };
+        }
+        
+        // For PM2-managed apps (NestJS, Next.js)
+        const pm2Status = await this.getPM2Status(app.name);
         return {
           ...app,
           status: pm2Status.status,
@@ -36,6 +51,28 @@ export class AppsService {
     );
 
     return enrichedApps;
+  }
+
+  private async getStaticAppStatus(appName: string): Promise<{ status: string; uptime: string }> {
+    try {
+      // Check if /var/www/{appName}/index.html exists
+      const staticPath = `/var/www/${appName}/index.html`;
+      await fs.promises.access(staticPath, fs.constants.F_OK);
+      
+      // Get file modification time for uptime approximation
+      const stats = await fs.promises.stat(staticPath);
+      const uptimeMs = Date.now() - stats.mtimeMs;
+      
+      return {
+        status: 'running',
+        uptime: this.formatUptime(uptimeMs),
+      };
+    } catch {
+      return {
+        status: 'stopped',
+        uptime: '-',
+      };
+    }
   }
 
   async findOne(id: string) {

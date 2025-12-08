@@ -280,20 +280,24 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
             </span>
           </div>
 
-          {app.status === 'running' && (
+          {(app.status === 'running' || app.type === 'vitejs') && (
             <div className="pt-2 border-t border-border">
-              <div className="flex items-center justify-between text-[10px] md:text-xs text-muted-foreground mb-1">
-                <span>Resources</span>
-                <span>{app.cpu}% CPU · {app.memory}MB</span>
-              </div>
-              <div className="flex gap-1">
-                <div className="h-1.5 flex-1 rounded-full bg-secondary overflow-hidden">
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-[10px] md:text-xs">
+                  <span className="text-muted-foreground">CPU</span>
+                  <span className="text-foreground">{app.cpu || 0}%</span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
                   <div 
                     className="h-full bg-primary transition-all duration-500" 
-                    style={{ width: `${app.cpu}%` }}
+                    style={{ width: `${app.cpu || 0}%` }}
                   />
                 </div>
-                <div className="h-1.5 flex-1 rounded-full bg-secondary overflow-hidden">
+                <div className="flex items-center justify-between text-[10px] md:text-xs">
+                  <span className="text-muted-foreground">Memória</span>
+                  <span className="text-foreground">{app.memory || 0}MB</span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
                   <div 
                     className="h-full bg-cyan-400 transition-all duration-500" 
                     style={{ width: `${Math.min((app.memory || 0) / 10, 100)}%` }}
