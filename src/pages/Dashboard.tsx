@@ -30,14 +30,32 @@ export default function Dashboard() {
   const loadData = useCallback(async (showLoader = false) => {
     try {
       if (showLoader) setIsLoading(true);
-      const [appsData, statsData, logsData] = await Promise.all([
+      
+      // Use Promise.allSettled to prevent one failing request from blocking others
+      const [appsResult, statsResult, logsResult] = await Promise.allSettled([
         api.getApps(),
         api.getStats(),
         api.getSystemLogs({ limit: 10 }),
       ]);
-      setApps(appsData);
-      setStats(statsData);
-      setLogs(logsData);
+      
+      if (appsResult.status === 'fulfilled') {
+        setApps(appsResult.value);
+      } else {
+        console.error('Failed to load apps:', appsResult.reason);
+      }
+      
+      if (statsResult.status === 'fulfilled') {
+        setStats(statsResult.value);
+      } else {
+        console.error('Failed to load stats:', statsResult.reason);
+      }
+      
+      if (logsResult.status === 'fulfilled') {
+        setLogs(logsResult.value);
+      } else {
+        console.error('Failed to load logs:', logsResult.reason);
+      }
+      
       setLastUpdated(new Date());
     } catch (error: any) {
       if (showLoader) {
