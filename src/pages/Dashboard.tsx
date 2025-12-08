@@ -58,14 +58,14 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-6 md:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-          <p className="mt-1 text-muted-foreground">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground">Dashboard</h1>
+          <p className="mt-1 text-sm md:text-base text-muted-foreground">
             Gerencie seus deploys e monitore suas aplicações
           </p>
         </div>
-        <Button asChild variant="gradient" size="lg">
+        <Button asChild variant="gradient" size="default" className="w-full sm:w-auto">
           <Link to="/deploy">
             <Plus className="h-5 w-5" />
             Novo Deploy
@@ -73,53 +73,53 @@ export default function Dashboard() {
         </Button>
       </div>
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 md:mb-8 grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
         <StatsCard
           title="Total Apps"
           value={stats?.totalApps || 0}
           subtitle="Aplicações deployadas"
-          icon={<Server className="h-6 w-6" />}
+          icon={<Server className="h-5 w-5 md:h-6 md:w-6" />}
         />
         <StatsCard
           title="Rodando"
           value={stats?.runningApps || 0}
           subtitle="Processos ativos"
-          icon={<Activity className="h-6 w-6" />}
+          icon={<Activity className="h-5 w-5 md:h-6 md:w-6" />}
         />
         <StatsCard
           title="Total Deploys"
           value={stats?.totalDeploys || 0}
           subtitle="Todos os tempos"
-          icon={<Rocket className="h-6 w-6" />}
+          icon={<Rocket className="h-5 w-5 md:h-6 md:w-6" />}
         />
         <StatsCard
           title="Problemas"
           value={errorApps}
           subtitle="Precisam atenção"
-          icon={<AlertCircle className="h-6 w-6" />}
+          icon={<AlertCircle className="h-5 w-5 md:h-6 md:w-6" />}
           className={errorApps > 0 ? 'border-destructive/30' : ''}
         />
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-3">
+      <div className="grid gap-6 md:gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-foreground">Aplicações</h2>
-            <span className="text-sm text-muted-foreground">
+            <h2 className="text-lg md:text-xl font-semibold text-foreground">Aplicações</h2>
+            <span className="text-xs md:text-sm text-muted-foreground">
               {apps.length} apps · ~/apps
             </span>
           </div>
           {apps.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-12 text-center">
-              <Server className="mx-auto h-12 w-12 text-muted-foreground" />
-              <h3 className="mt-4 text-lg font-medium">Nenhuma aplicação</h3>
-              <p className="mt-2 text-muted-foreground">Comece fazendo seu primeiro deploy</p>
+            <div className="rounded-xl border border-dashed border-border p-8 md:p-12 text-center">
+              <Server className="mx-auto h-10 w-10 md:h-12 md:w-12 text-muted-foreground" />
+              <h3 className="mt-4 text-base md:text-lg font-medium">Nenhuma aplicação</h3>
+              <p className="mt-2 text-sm text-muted-foreground">Comece fazendo seu primeiro deploy</p>
               <Button asChild variant="gradient" className="mt-4">
                 <Link to="/deploy">Novo Deploy</Link>
               </Button>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
               {apps.map((app, index) => (
                 <div key={app.id} className={`opacity-0 animate-slide-in stagger-${Math.min(index + 1, 5)}`}>
                   <AppCard app={app} onRefresh={loadData} />
@@ -129,10 +129,10 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="space-y-6">
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h3 className="mb-6 font-semibold text-foreground">Uso de Recursos</h3>
-            <div className="flex justify-around">
+        <div className="space-y-4 md:space-y-6">
+          <div className="rounded-xl border border-border bg-card p-4 md:p-6">
+            <h3 className="mb-4 md:mb-6 font-semibold text-foreground text-sm md:text-base">Uso de Recursos</h3>
+            <div className="flex justify-around gap-2">
               <UsageChart label="CPU" value={stats?.cpuUsage || 0} color="primary" />
               <UsageChart label="Memória" value={stats?.memoryUsage || 0} color="cyan" />
               <UsageChart label="Disco" value={stats?.diskUsage || 0} color="warning" />
