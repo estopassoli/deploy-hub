@@ -20,12 +20,7 @@ import {
   CheckCircle2,
   Loader2,
   XCircle,
-  ShieldCheck,
-  Package,
-  Hammer,
-  Database,
-  Play,
-  Settings
+  ShieldCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -33,7 +28,6 @@ import api from '@/lib/api';
 import { getConnectedSocket, getSocket } from '@/lib/websocket';
 
 type DeployStep = 'config' | 'deploying' | 'complete' | 'error';
-type DeployPhase = 'cloning' | 'installing' | 'building' | 'migrating' | 'starting' | 'configuring' | 'done';
 
 interface DeployResult {
   success: boolean;
@@ -47,37 +41,26 @@ interface DeployResult {
   };
 }
 
-const DEPLOY_PHASES: { key: DeployPhase; label: string; icon: string; estimatedSeconds: number }[] = [
-  { key: 'cloning', label: 'Clonando', icon: 'GitBranch', estimatedSeconds: 15 },
-  { key: 'installing', label: 'Instalando', icon: 'Package', estimatedSeconds: 60 },
-  { key: 'building', label: 'Buildando', icon: 'Hammer', estimatedSeconds: 90 },
-  { key: 'migrating', label: 'Migrando', icon: 'Database', estimatedSeconds: 10 },
-  { key: 'starting', label: 'Iniciando', icon: 'Play', estimatedSeconds: 15 },
-  { key: 'configuring', label: 'Configurando', icon: 'Settings', estimatedSeconds: 20 },
-];
+interface LogLine {
+  id: string;
+  timestamp: Date;
+  level: 'info' | 'warn' | 'error' | 'debug';
+  message: string;
+}
 
-// Phase is now sent by backend via WebSocket
+const levelColors = {
+  info: 'text-cyan-400',
+  warn: 'text-warning',
+  error: 'text-destructive',
+  debug: 'text-muted-foreground',
+};
 
-function calculateTimeRemaining(currentPhase: DeployPhase, phaseStartTime: number): { minutes: number; seconds: number; percentage: number } {
-  const currentIndex = DEPLOY_PHASES.findIndex(p => p.key === currentPhase);
-  const totalEstimated = DEPLOY_PHASES.reduce((acc, p) => acc + p.estimatedSeconds, 0);
-  const completedTime = DEPLOY_PHASES.slice(0, currentIndex).reduce((acc, p) => acc + p.estimatedSeconds, 0);
-  
-  const currentPhaseData = DEPLOY_PHASES[currentIndex];
-  const elapsedInPhase = Math.floor((Date.now() - phaseStartTime) / 1000);
-  const remainingInPhase = Math.max(0, currentPhaseData.estimatedSeconds - elapsedInPhase);
-  
-  const remainingPhases = DEPLOY_PHASES.slice(currentIndex + 1);
-  const remainingTime = remainingInPhase + remainingPhases.reduce((acc, p) => acc + p.estimatedSeconds, 0);
-  
-  const elapsedTotal = completedTime + Math.min(elapsedInPhase, currentPhaseData.estimatedSeconds);
-  const percentage = Math.min(95, Math.round((elapsedTotal / totalEstimated) * 100));
-  
-  return {
-    minutes: Math.floor(remainingTime / 60),
-    seconds: remainingTime % 60,
-    percentage
-  };
+function parseLogLevel(message: string): 'info' | 'warn' | 'error' | 'debug' {
+  const lowerMsg = message.toLowerCase();
+  if (lowerMsg.includes('error') || message.startsWith('❌')) return 'error';
+  if (lowerMsg.includes('warn')) return 'warn';
+  if (message.startsWith('✓') || message.startsWith('🚀')) return 'info';
+  return 'debug';
 }
 
 export default function Deploy() {
@@ -99,31 +82,10 @@ export default function Deploy() {
   });
   const [portError, setPortError] = useState('');
   const [portChecking, setPortChecking] = useState(false);
-  const [deployLogs, setDeployLogs] = useState<string[]>([]);
+  const [deployLogs, setDeployLogs] = useState<LogLine[]>([]);
   const [deployResult, setDeployResult] = useState<DeployResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
-  const [phaseStartTime, setPhaseStartTime] = useState<number>(Date.now());
-  const [timeRemaining, setTimeRemaining] = useState({ minutes: 0, seconds: 0, percentage: 0 });
-  const [currentPhase, setCurrentPhase] = useState<DeployPhase>('cloning');
   const logsEndRef = useRef<HTMLDivElement>(null);
-
-  // Update phase start time when phase changes
-  useEffect(() => {
-    if (step === 'deploying') {
-      setPhaseStartTime(Date.now());
-    }
-  }, [currentPhase, step]);
-
-  // Update time remaining every second during deployment
-  useEffect(() => {
-    if (step !== 'deploying') return;
-    
-    const interval = setInterval(() => {
-      setTimeRemaining(calculateTimeRemaining(currentPhase, phaseStartTime));
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [step, currentPhase, phaseStartTime]);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -137,6 +99,16 @@ export default function Deploy() {
       socket.emit('unsubscribe-deploy');
     };
   }, []);
+
+  const addLog = (message: string) => {
+    const log: LogLine = {
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: new Date(),
+      level: parseLogLevel(message),
+      message,
+    };
+    setDeployLogs(prev => [...prev, log]);
+  };
 
   const handlePortChange = async (value: string) => {
     setFormData({ ...formData, port: value });
@@ -180,14 +152,10 @@ export default function Deploy() {
     const socket = await getConnectedSocket();
     console.log('WebSocket connected, subscribing to deploy logs for:', formData.name);
     
-    const handleDeployLog = (data: { appName: string; message: string; phase?: string }) => {
+    const handleDeployLog = (data: { appName: string; message: string }) => {
       console.log('Deploy log received:', data);
       if (data.appName === formData.name) {
-        setDeployLogs(prev => [...prev, data.message]);
-        // Update phase from backend
-        if (data.phase) {
-          setCurrentPhase(data.phase as DeployPhase);
-        }
+        addLog(data.message);
       }
     };
 
@@ -195,21 +163,15 @@ export default function Deploy() {
       console.log('Deploy complete received:', data);
       if (data.appName === formData.name) {
         if (data.success) {
-          setDeployLogs(prev => [
-            ...prev,
-            '',
-            '🚀 Deploy completed successfully!',
-            `  Version: ${data.version}`
-          ]);
+          addLog('');
+          addLog('🚀 Deploy completed successfully!');
+          addLog(`  Version: ${data.version}`);
           setStep('complete');
           toast.success('Deploy completed successfully!');
         } else {
           setErrorMessage(data.error || 'Deploy failed');
-          setDeployLogs(prev => [
-            ...prev,
-            '',
-            `❌ Deploy failed: ${data.error}`
-          ]);
+          addLog('');
+          addLog(`❌ Deploy failed: ${data.error}`);
           setStep('error');
           toast.error(data.error || 'Deploy failed');
         }
@@ -228,16 +190,14 @@ export default function Deploy() {
     await new Promise(resolve => setTimeout(resolve, 100));
 
     setStep('deploying');
-    setCurrentPhase('cloning');
-    setDeployLogs([
-      '▶ Starting deploy process...',
-      `  Repository: ${formData.repository}`,
-      `  App: ${formData.name}`,
-      `  Type: ${formData.type}`,
-      `  Port: ${formData.port}`,
-      `  Branch: ${formData.branch}`,
-      ''
-    ]);
+    setDeployLogs([]);
+    addLog('▶ Starting deploy process...');
+    addLog(`  Repository: ${formData.repository}`);
+    addLog(`  App: ${formData.name}`);
+    addLog(`  Type: ${formData.type}`);
+    addLog(`  Port: ${formData.port}`);
+    addLog(`  Branch: ${formData.branch}`);
+    addLog('');
 
     try {
       const result = await api.deploy({
@@ -262,11 +222,8 @@ export default function Deploy() {
       // The actual deploy errors come via WebSocket
       if (!error.message?.includes('Deploy')) {
         setErrorMessage(error.message || 'Deploy failed');
-        setDeployLogs(prev => [
-          ...prev,
-          '',
-          `❌ Request failed: ${error.message}`
-        ]);
+        addLog('');
+        addLog(`❌ Request failed: ${error.message}`);
         setStep('error');
         toast.error(error.message || 'Deploy failed');
         socket.off('deploy:log', handleDeployLog);
@@ -585,81 +542,6 @@ export default function Deploy() {
         {/* Deploying */}
         {(step === 'deploying' || step === 'error') && (
           <div className="space-y-4">
-            {/* Phase Progress Indicator */}
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Progresso do Deploy</span>
-                {step === 'deploying' && (
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-muted-foreground">
-                      ~{timeRemaining.minutes > 0 ? `${timeRemaining.minutes}m ` : ''}{timeRemaining.seconds}s restantes
-                    </span>
-                    <span className="text-xs text-primary flex items-center gap-1">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      {timeRemaining.percentage}%
-                    </span>
-                  </div>
-                )}
-              </div>
-              
-              {/* Progress Bar */}
-              {step === 'deploying' && (
-                <div className="h-2 w-full bg-secondary rounded-full mb-4 overflow-hidden">
-                  <div 
-                    className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
-                    style={{ width: `${timeRemaining.percentage}%` }}
-                  />
-                </div>
-              )}
-              <div className="flex items-center justify-between gap-1 overflow-hidden">
-                {DEPLOY_PHASES.map((phase, index) => {
-                  const phaseIndex = DEPLOY_PHASES.findIndex(p => p.key === currentPhase);
-                  const isActive = phase.key === currentPhase;
-                  const isComplete = index < phaseIndex;
-                  const isPending = index > phaseIndex;
-                  
-                  const IconComponent = {
-                    GitBranch,
-                    Package,
-                    Hammer,
-                    Database,
-                    Play,
-                    Settings,
-                  }[phase.icon] || Server;
-                  
-                  return (
-                    <div key={phase.key} className="flex flex-col items-center flex-1 min-w-0">
-                      <div className={cn(
-                        'flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all duration-300',
-                        isActive && 'bg-primary text-primary-foreground ring-4 ring-primary/20',
-                        isComplete && 'bg-success text-success-foreground',
-                        isPending && 'bg-secondary text-muted-foreground',
-                        step === 'error' && isActive && 'bg-destructive text-destructive-foreground ring-4 ring-destructive/20'
-                      )}>
-                        {isComplete ? (
-                          <CheckCircle2 className="h-5 w-5" />
-                        ) : isActive && step === 'deploying' ? (
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                        ) : step === 'error' && isActive ? (
-                          <XCircle className="h-5 w-5" />
-                        ) : (
-                          <IconComponent className="h-5 w-5" />
-                        )}
-                      </div>
-                      <span className={cn(
-                        'text-xs mt-2 text-center truncate w-full',
-                        isActive && 'text-primary font-medium',
-                        isComplete && 'text-success',
-                        isPending && 'text-muted-foreground'
-                      )}>
-                        {phase.label}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
             {/* Deploy Info Card */}
             <div className="rounded-xl border border-border bg-card p-4">
               <div className="flex items-center gap-2 mb-3">
@@ -690,34 +572,44 @@ export default function Deploy() {
               </div>
             </div>
 
-            {/* Real-time Logs */}
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex items-center gap-2 border-b border-border px-4 py-2 bg-secondary/30">
-                <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                <span className="text-sm font-medium">Build Logs</span>
-                <span className="text-xs text-muted-foreground ml-auto">
-                  {deployLogs.length} lines
+            {/* Real-time Logs - Same style as /logs page */}
+            <div className="rounded-xl border border-border bg-background overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-2">
+                <div className="flex gap-1.5">
+                  <div className="h-3 w-3 rounded-full bg-destructive/80" />
+                  <div className="h-3 w-3 rounded-full bg-warning/80" />
+                  <div className="h-3 w-3 rounded-full bg-success/80" />
+                </div>
+                <span className="ml-2 text-xs text-muted-foreground font-mono">
+                  deploy --app {formData.name}
                 </span>
+                <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className={cn('h-2 w-2 rounded-full', step === 'deploying' ? 'bg-success animate-pulse' : 'bg-destructive')} />
+                  {step === 'deploying' ? 'Streaming' : 'Failed'}
+                  <span>·</span>
+                  <span>{deployLogs.length} lines</span>
+                </div>
               </div>
-              <div className="h-[350px] overflow-auto bg-background p-4 font-mono text-xs terminal-scroll">
-                {deployLogs.map((log, index) => (
-                  <div 
-                    key={index} 
-                    className={cn(
-                      'py-0.5 whitespace-pre-wrap break-all',
-                      log?.startsWith('✓') && 'text-success',
-                      log?.startsWith('▶') && 'text-primary font-semibold',
-                      log?.startsWith('🚀') && 'text-primary font-bold',
-                      log?.startsWith('❌') && 'text-destructive font-bold',
-                      log?.startsWith('$') && 'text-yellow-500',
-                      log?.includes('error') && 'text-destructive',
-                      log?.includes('warning') && 'text-yellow-500',
-                      !log?.startsWith('✓') && !log?.startsWith('▶') && !log?.startsWith('🚀') && !log?.startsWith('❌') && !log?.startsWith('$') && 'text-muted-foreground'
-                    )}
-                  >
-                    {log || '\u00A0'}
+              <div className="h-[400px] overflow-auto p-4 font-mono text-sm terminal-scroll">
+                {deployLogs.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-muted-foreground">
+                    Waiting for logs...
                   </div>
-                ))}
+                ) : (
+                  deployLogs.map((log) => (
+                    <div key={log.id} className="flex gap-2 py-0.5 hover:bg-secondary/30">
+                      <span className="text-muted-foreground shrink-0">
+                        {log.timestamp.toLocaleTimeString()}
+                      </span>
+                      <span className={cn('shrink-0 font-semibold uppercase w-12', levelColors[log.level])}>
+                        [{log.level.slice(0, 4)}]
+                      </span>
+                      <span className="text-foreground/90 break-all">
+                        {log.message}
+                      </span>
+                    </div>
+                  ))
+                )}
                 <div ref={logsEndRef} />
               </div>
             </div>
