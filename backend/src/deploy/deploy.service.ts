@@ -291,8 +291,15 @@ export class DeployService {
         }
       }
 
-      // Build - use custom command if provided
-      const buildCmd = options.buildCommand || 'npm run build';
+      // Build - use custom command if provided, or use npx for nestjs to avoid global CLI requirement
+      let buildCmd = options.buildCommand;
+      if (!buildCmd) {
+        if (app.type === 'nestjs') {
+          buildCmd = 'npx nest build';
+        } else {
+          buildCmd = 'npm run build';
+        }
+      }
       this.log(app.name, `▶ Building ${app.type} application...`, deploy.id);
       await this.runCommand(buildCmd, releaseDir, app.name, deploy.id, envVarsObj);
       this.log(app.name, '✓ Build completed', deploy.id);
