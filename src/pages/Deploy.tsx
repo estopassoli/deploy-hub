@@ -47,13 +47,13 @@ interface DeployResult {
   };
 }
 
-const DEPLOY_PHASES: { key: DeployPhase; label: string; icon: string }[] = [
-  { key: 'cloning', label: 'Clonando', icon: 'GitBranch' },
-  { key: 'installing', label: 'Instalando', icon: 'Package' },
-  { key: 'building', label: 'Buildando', icon: 'Hammer' },
-  { key: 'migrating', label: 'Migrando', icon: 'Database' },
-  { key: 'starting', label: 'Iniciando', icon: 'Play' },
-  { key: 'configuring', label: 'Configurando', icon: 'Settings' },
+const DEPLOY_PHASES: { key: DeployPhase; label: string; icon: string; estimatedSeconds: number }[] = [
+  { key: 'cloning', label: 'Clonando', icon: 'GitBranch', estimatedSeconds: 15 },
+  { key: 'installing', label: 'Instalando', icon: 'Package', estimatedSeconds: 60 },
+  { key: 'building', label: 'Buildando', icon: 'Hammer', estimatedSeconds: 90 },
+  { key: 'migrating', label: 'Migrando', icon: 'Database', estimatedSeconds: 10 },
+  { key: 'starting', label: 'Iniciando', icon: 'Play', estimatedSeconds: 15 },
+  { key: 'configuring', label: 'Configurando', icon: 'Settings', estimatedSeconds: 20 },
 ];
 
 function detectPhase(logs: string[]): DeployPhase {
@@ -67,6 +67,28 @@ function detectPhase(logs: string[]): DeployPhase {
   if (allLogs.includes('clone') || allLogs.includes('git')) return 'cloning';
   
   return 'cloning';
+}
+
+function calculateTimeRemaining(currentPhase: DeployPhase, phaseStartTime: number): { minutes: number; seconds: number; percentage: number } {
+  const currentIndex = DEPLOY_PHASES.findIndex(p => p.key === currentPhase);
+  const totalEstimated = DEPLOY_PHASES.reduce((acc, p) => acc + p.estimatedSeconds, 0);
+  const completedTime = DEPLOY_PHASES.slice(0, currentIndex).reduce((acc, p) => acc + p.estimatedSeconds, 0);
+  
+  const currentPhaseData = DEPLOY_PHASES[currentIndex];
+  const elapsedInPhase = Math.floor((Date.now() - phaseStartTime) / 1000);
+  const remainingInPhase = Math.max(0, currentPhaseData.estimatedSeconds - elapsedInPhase);
+  
+  const remainingPhases = DEPLOY_PHASES.slice(currentIndex + 1);
+  const remainingTime = remainingInPhase + remainingPhases.reduce((acc, p) => acc + p.estimatedSeconds, 0);
+  
+  const elapsedTotal = completedTime + Math.min(elapsedInPhase, currentPhaseData.estimatedSeconds);
+  const percentage = Math.min(95, Math.round((elapsedTotal / totalEstimated) * 100));
+  
+  return {
+    minutes: Math.floor(remainingTime / 60),
+    seconds: remainingTime % 60,
+    percentage
+  };
 }
 
 export default function Deploy() {
@@ -91,9 +113,29 @@ export default function Deploy() {
   const [deployLogs, setDeployLogs] = useState<string[]>([]);
   const [deployResult, setDeployResult] = useState<DeployResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [phaseStartTime, setPhaseStartTime] = useState<number>(Date.now());
+  const [timeRemaining, setTimeRemaining] = useState({ minutes: 0, seconds: 0, percentage: 0 });
   const logsEndRef = useRef<HTMLDivElement>(null);
   
   const currentPhase = detectPhase(deployLogs);
+
+  // Update phase start time when phase changes
+  useEffect(() => {
+    if (step === 'deploying') {
+      setPhaseStartTime(Date.now());
+    }
+  }, [currentPhase, step]);
+
+  // Update time remaining every second during deployment
+  useEffect(() => {
+    if (step !== 'deploying') return;
+    
+    const interval = setInterval(() => {
+      setTimeRemaining(calculateTimeRemaining(currentPhase, phaseStartTime));
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [step, currentPhase, phaseStartTime]);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -523,15 +565,30 @@ export default function Deploy() {
           <div className="space-y-4">
             {/* Phase Progress Indicator */}
             <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium">Progresso do Deploy</span>
                 {step === 'deploying' && (
-                  <span className="text-xs text-primary flex items-center gap-1">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Em andamento...
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">
+                      ~{timeRemaining.minutes > 0 ? `${timeRemaining.minutes}m ` : ''}{timeRemaining.seconds}s restantes
+                    </span>
+                    <span className="text-xs text-primary flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      {timeRemaining.percentage}%
+                    </span>
+                  </div>
                 )}
               </div>
+              
+              {/* Progress Bar */}
+              {step === 'deploying' && (
+                <div className="h-2 w-full bg-secondary rounded-full mb-4 overflow-hidden">
+                  <div 
+                    className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${timeRemaining.percentage}%` }}
+                  />
+                </div>
+              )}
               <div className="flex items-center justify-between gap-1">
                 {DEPLOY_PHASES.map((phase, index) => {
                   const phaseIndex = DEPLOY_PHASES.findIndex(p => p.key === currentPhase);
