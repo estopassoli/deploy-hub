@@ -142,44 +142,13 @@ export default function Deploy() {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [deployLogs]);
 
-  // Listen for deploy logs via WebSocket
+  // Cleanup WebSocket on unmount
   useEffect(() => {
-    // Continue listening for logs during deploying and error states
-    if ((step !== 'deploying' && step !== 'error') || !formData.name) return;
-
-    const socket = getSocket();
-    
-    // Subscribe to deploy logs for this app
-    socket.emit('subscribe-deploy', { appName: formData.name });
-    
-    const handleDeployLog = (data: { appName: string; message: string }) => {
-      console.log('Deploy log received:', data);
-      if (data.appName === formData.name) {
-        setDeployLogs(prev => [...prev, data.message]);
-      }
-    };
-
-    // Listen for deploy completion
-    const handleDeployComplete = (data: { appName: string; success: boolean; error?: string }) => {
-      if (data.appName === formData.name) {
-        if (data.success) {
-          setStep('complete');
-        } else {
-          setErrorMessage(data.error || 'Deploy failed');
-          setStep('error');
-        }
-      }
-    };
-
-    socket.on('deploy:log', handleDeployLog);
-    socket.on('deploy:complete', handleDeployComplete);
-
     return () => {
-      socket.off('deploy:log', handleDeployLog);
-      socket.off('deploy:complete', handleDeployComplete);
+      const socket = getSocket();
       socket.emit('unsubscribe-deploy');
     };
-  }, [step, formData.name]);
+  }, []);
 
   const handlePortChange = async (value: string) => {
     setFormData({ ...formData, port: value });
@@ -219,6 +188,48 @@ export default function Deploy() {
   };
 
   const handleDeploy = async () => {
+    // Subscribe to WebSocket BEFORE starting deploy
+    const socket = getSocket();
+    
+    const handleDeployLog = (data: { appName: string; message: string }) => {
+      console.log('Deploy log received:', data);
+      if (data.appName === formData.name) {
+        setDeployLogs(prev => [...prev, data.message]);
+      }
+    };
+
+    const handleDeployComplete = (data: { appName: string; success: boolean; error?: string; version?: string }) => {
+      if (data.appName === formData.name) {
+        if (data.success) {
+          setDeployLogs(prev => [
+            ...prev,
+            '',
+            '🚀 Deploy completed successfully!',
+            `  Version: ${data.version}`
+          ]);
+          setStep('complete');
+          toast.success('Deploy completed successfully!');
+        } else {
+          setErrorMessage(data.error || 'Deploy failed');
+          setDeployLogs(prev => [
+            ...prev,
+            '',
+            `❌ Deploy failed: ${data.error}`
+          ]);
+          setStep('error');
+          toast.error(data.error || 'Deploy failed');
+        }
+        // Cleanup listeners after completion
+        socket.off('deploy:log', handleDeployLog);
+        socket.off('deploy:complete', handleDeployComplete);
+      }
+    };
+
+    // Subscribe to events BEFORE starting deploy
+    socket.on('deploy:log', handleDeployLog);
+    socket.on('deploy:complete', handleDeployComplete);
+    socket.emit('subscribe-deploy', { appName: formData.name });
+
     setStep('deploying');
     setDeployLogs([
       '▶ Starting deploy process...',
@@ -247,24 +258,22 @@ export default function Deploy() {
       });
 
       setDeployResult(result);
-      setDeployLogs(prev => [
-        ...prev,
-        '',
-        '🚀 Deploy completed successfully!',
-        `  Version: ${result.version}`,
-        `  Path: ${result.deploy.path}`
-      ]);
-      setStep('complete');
-      toast.success('Deploy completed successfully!');
+      // Note: completion is now handled by WebSocket event
     } catch (error: any) {
-      setErrorMessage(error.message || 'Deploy failed');
-      setDeployLogs(prev => [
-        ...prev,
-        '',
-        `❌ Deploy failed: ${error.message}`
-      ]);
-      setStep('error');
-      toast.error(error.message || 'Deploy failed');
+      // Only handle immediate errors (network issues, etc)
+      // The actual deploy errors come via WebSocket
+      if (!error.message?.includes('Deploy')) {
+        setErrorMessage(error.message || 'Deploy failed');
+        setDeployLogs(prev => [
+          ...prev,
+          '',
+          `❌ Request failed: ${error.message}`
+        ]);
+        setStep('error');
+        toast.error(error.message || 'Deploy failed');
+        socket.off('deploy:log', handleDeployLog);
+        socket.off('deploy:complete', handleDeployComplete);
+      }
     }
   };
 
