@@ -4,7 +4,6 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { AppsModule } from './apps/apps.module';
 import { DeployModule } from './deploy/deploy.module';
-import { LogsModule } from './logs/logs.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { SystemModule } from './system/system.module';
 import { MetricsModule } from './metrics/metrics.module';
@@ -18,7 +17,6 @@ import { TerminalModule } from './terminal/terminal.module';
     AuthModule,
     AppsModule,
     DeployModule,
-    LogsModule,
     WebhookModule,
     SystemModule,
     MetricsModule,
