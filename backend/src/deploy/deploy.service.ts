@@ -291,23 +291,25 @@ export class DeployService {
         }
       }
 
-      // For NestJS projects, ensure required dev dependencies are available for build (only if using default nest build)
-      if (app.type === 'nestjs' && !options.buildCommand?.trim()) {
+      // For NestJS projects, ensure required dev dependencies are available for TypeScript compilation
+      if (app.type === 'nestjs') {
         const missingDeps: string[] = [];
         
-        // Check for @nestjs/cli
-        if (!fs.existsSync(path.join(releaseDir, 'node_modules', '.bin', 'nest'))) {
-          missingDeps.push('@nestjs/cli');
-        }
-        
-        // Check for @types/node (required for process.env)
+        // @types/node is ALWAYS required for any TypeScript project using process.env
         if (!fs.existsSync(path.join(releaseDir, 'node_modules', '@types', 'node'))) {
           missingDeps.push('@types/node');
         }
         
-        // Check for typescript
+        // typescript is ALWAYS required for TypeScript compilation
         if (!fs.existsSync(path.join(releaseDir, 'node_modules', 'typescript'))) {
           missingDeps.push('typescript');
+        }
+        
+        // @nestjs/cli is only needed if using default nest build command
+        if (!options.buildCommand?.trim()) {
+          if (!fs.existsSync(path.join(releaseDir, 'node_modules', '.bin', 'nest'))) {
+            missingDeps.push('@nestjs/cli');
+          }
         }
         
         if (missingDeps.length > 0) {
