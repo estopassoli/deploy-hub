@@ -77,3 +77,12 @@ model Setting {
   key   String @unique
   value String
 }
+
+model SystemSettings {
+  id              String   @id @default(uuid())
+  emailEnabled    Boolean  @default(false)
+  emailRecipient  String?
+  slackWebhook    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

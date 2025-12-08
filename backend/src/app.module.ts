@@ -8,6 +8,7 @@ import { LogsModule } from './logs/logs.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { SystemModule } from './system/system.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { EmailModule } from './email/email.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { MetricsModule } from './metrics/metrics.module';
     WebhookModule,
     SystemModule,
     MetricsModule,
+    EmailModule,
   ],
 })
 export class AppModule {}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,9 +13,12 @@ import {
   Database,
   Trash2,
   Save,
-  RefreshCw
+  RefreshCw,
+  Mail,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { api } from '@/lib/api';
 
 export default function Settings() {
   const [settings, setSettings] = useState({
@@ -25,9 +28,54 @@ export default function Settings() {
     appsPath: '~/apps',
     retentionDays: '30',
     autoCleanup: true,
-    emailNotifications: true,
     slackWebhook: '',
   });
+
+  const [emailSettings, setEmailSettings] = useState({
+    emailEnabled: false,
+    emailRecipient: '',
+  });
+
+  const [loadingEmail, setLoadingEmail] = useState(true);
+  const [savingEmail, setSavingEmail] = useState(false);
+
+  useEffect(() => {
+    loadEmailSettings();
+  }, []);
+
+  const loadEmailSettings = async () => {
+    try {
+      const data = await api.getSettings();
+      setEmailSettings({
+        emailEnabled: data.emailEnabled,
+        emailRecipient: data.emailRecipient || '',
+      });
+    } catch (error) {
+      console.error('Failed to load email settings:', error);
+    } finally {
+      setLoadingEmail(false);
+    }
+  };
+
+  const handleSaveEmailSettings = async () => {
+    if (emailSettings.emailEnabled && !emailSettings.emailRecipient) {
+      toast.error('Informe o email de destino para ativar notificações');
+      return;
+    }
+
+    setSavingEmail(true);
+    try {
+      await api.updateEmailSettings({
+        emailEnabled: emailSettings.emailEnabled,
+        emailRecipient: emailSettings.emailRecipient || undefined,
+      });
+      toast.success('Configurações de email salvas');
+    } catch (error) {
+      toast.error('Erro ao salvar configurações de email');
+    } finally {
+      setSavingEmail(false);
+    }
+  };
 
   const handleSave = () => {
     toast.success('Settings saved successfully');
@@ -159,17 +207,67 @@ export default function Settings() {
 
               <Separator />
 
-              <div className="flex items-center justify-between">
-                <div>
+              {/* Email Notifications Section */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-primary" />
                   <p className="font-medium text-foreground">Email Notifications</p>
-                  <p className="text-sm text-muted-foreground">
-                    Receive deploy status updates via email
-                  </p>
                 </div>
-                <Switch
-                  checked={settings.emailNotifications}
-                  onCheckedChange={(checked) => setSettings({ ...settings, emailNotifications: checked })}
-                />
+                
+                {loadingEmail ? (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Carregando...
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-foreground">Ativar notificações por email</p>
+                        <p className="text-xs text-muted-foreground">
+                          Receba alertas de deploy e aplicações paradas
+                        </p>
+                      </div>
+                      <Switch
+                        checked={emailSettings.emailEnabled}
+                        onCheckedChange={(checked) => 
+                          setEmailSettings({ ...emailSettings, emailEnabled: checked })
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="emailRecipient">Email de destino</Label>
+                      <Input
+                        id="emailRecipient"
+                        type="email"
+                        placeholder="seu@email.com"
+                        value={emailSettings.emailRecipient}
+                        onChange={(e) => 
+                          setEmailSettings({ ...emailSettings, emailRecipient: e.target.value })
+                        }
+                        className="font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Notificações serão enviadas para este endereço
+                      </p>
+                    </div>
+
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={handleSaveEmailSettings}
+                      disabled={savingEmail}
+                    >
+                      {savingEmail ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
+                      Salvar Email
+                    </Button>
+                  </>
+                )}
               </div>
 
               <Separator />

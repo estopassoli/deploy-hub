@@ -7,6 +7,7 @@ import { promisify } from 'util';
 import { AppsService } from '../apps/apps.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployGateway } from './deploy.gateway';
+import { EmailService } from '../email/email.service';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -17,6 +18,7 @@ export class DeployService {
     private prisma: PrismaService,
     private appsService: AppsService,
     private deployGateway: DeployGateway,
+    private emailService: EmailService,
   ) { }
 
   // Store logs per deploy for persistence
@@ -386,6 +388,9 @@ export class DeployService {
 
       this.deployGateway.emitDeployComplete(app.name, true, { version: timestamp, deploy });
 
+      // Send email notification for successful deploy
+      this.emailService.notifyDeploySuccess(app.name, timestamp).catch(console.error);
+
       return { success: true, version: timestamp, deploy };
     } catch (error) {
       const errorMessage = error.message || 'Unknown error';
@@ -417,6 +422,9 @@ export class DeployService {
       });
 
       this.deployGateway.emitDeployComplete(app.name, false, { error: errorMessage });
+
+      // Send email notification for failed deploy
+      this.emailService.notifyDeployFailed(app.name, errorMessage).catch(console.error);
 
       throw new BadRequestException(`Deploy falhou: ${errorMessage}`);
     }
