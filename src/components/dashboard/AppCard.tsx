@@ -174,24 +174,24 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
 
   return (
     <>
-      <div className="group relative overflow-hidden rounded-xl border border-border bg-card transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5">
+      <div className="group relative overflow-hidden rounded-xl border border-border bg-card transition-all duration-300 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 active:scale-[0.98] md:active:scale-100">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border p-4">
-          <div className="flex items-center gap-3">
-            <div className={cn('h-3 w-3 rounded-full', status.bg, app.status === 'running' && 'animate-pulse')} />
-            <div>
-              <h3 className="font-semibold text-foreground">{app.name}</h3>
+        <div className="flex items-center justify-between border-b border-border p-3 md:p-4">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+            <div className={cn('h-2.5 w-2.5 md:h-3 md:w-3 flex-shrink-0 rounded-full', status.bg, app.status === 'running' && 'animate-pulse')} />
+            <div className="min-w-0">
+              <h3 className="font-semibold text-sm md:text-base text-foreground truncate">{app.name}</h3>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className={cn('inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium', type.color)}>
+                <span className={cn('inline-flex items-center rounded px-1.5 py-0.5 text-[10px] md:text-xs font-medium', type.color)}>
                   {type.label}
                 </span>
-                <span className="text-xs text-muted-foreground">:{app.port}</span>
+                <span className="text-[10px] md:text-xs text-muted-foreground">:{app.port}</span>
               </div>
             </div>
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm">
+              <Button variant="ghost" size="icon-sm" className="flex-shrink-0">
                 <MoreVertical className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -243,28 +243,28 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
         </div>
 
         {/* Body */}
-        <div className="p-4 space-y-3">
+        <div className="p-3 md:p-4 space-y-2 md:space-y-3">
           {app.domain && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Domain</span>
+            <div className="flex items-center justify-between text-xs md:text-sm gap-2">
+              <span className="text-muted-foreground flex-shrink-0">Domain</span>
               <a 
                 href={`https://${app.domain}`} 
                 target="_blank" 
                 rel="noopener noreferrer"
-                className="flex items-center gap-1 text-primary hover:underline"
+                className="flex items-center gap-1 text-primary hover:underline truncate"
               >
-                {app.domain}
-                <ExternalLink className="h-3 w-3" />
+                <span className="truncate">{app.domain}</span>
+                <ExternalLink className="h-3 w-3 flex-shrink-0" />
               </a>
             </div>
           )}
 
-          <div className="flex items-center justify-between text-sm">
+          <div className="flex items-center justify-between text-xs md:text-sm">
             <span className="text-muted-foreground">Status</span>
             <span className={cn('font-medium', status.color)}>{status.label}</span>
           </div>
 
-          <div className="flex items-center justify-between text-sm">
+          <div className="flex items-center justify-between text-xs md:text-sm">
             <span className="text-muted-foreground">Uptime</span>
             <span className="flex items-center gap-1 text-foreground">
               <Clock className="h-3 w-3" />
@@ -272,9 +272,9 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
             </span>
           </div>
 
-          <div className="flex items-center justify-between text-sm">
+          <div className="flex items-center justify-between text-xs md:text-sm">
             <span className="text-muted-foreground">Branch</span>
-            <span className="flex items-center gap-1 text-foreground font-mono text-xs">
+            <span className="flex items-center gap-1 text-foreground font-mono text-[10px] md:text-xs">
               <GitBranch className="h-3 w-3" />
               {app.branch}
             </span>
@@ -282,7 +282,7 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
 
           {app.status === 'running' && (
             <div className="pt-2 border-t border-border">
-              <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+              <div className="flex items-center justify-between text-[10px] md:text-xs text-muted-foreground mb-1">
                 <span>Resources</span>
                 <span>{app.cpu}% CPU · {app.memory}MB</span>
               </div>
@@ -305,26 +305,26 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <span>Last deploy: {app.lastDeploy || 'Never'}</span>
-          <span className="font-mono">{app.currentVersion?.slice(0, 16) || 'N/A'}</span>
+        <div className="flex items-center justify-between border-t border-border px-3 md:px-4 py-2 md:py-3 text-[10px] md:text-xs text-muted-foreground">
+          <span className="truncate">Last deploy: {app.lastDeploy || 'Never'}</span>
+          <span className="font-mono flex-shrink-0 ml-2">{app.currentVersion?.slice(0, 12) || 'N/A'}</span>
         </div>
       </div>
 
       {/* Redeploy Modal with Logs */}
       <Dialog open={showRedeployModal} onOpenChange={handleCloseRedeployModal}>
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col mx-4 sm:mx-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <RefreshCw className={cn("h-5 w-5", isRedeploying && "animate-spin text-primary")} />
-              Redeploying {app.name}
+            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <RefreshCw className={cn("h-5 w-5 flex-shrink-0", isRedeploying && "animate-spin text-primary")} />
+              <span className="truncate">Redeploying {app.name}</span>
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-xs sm:text-sm">
               Pulling latest changes from {app.branch} and rebuilding
             </DialogDescription>
           </DialogHeader>
           
-          <div className="flex-1 min-h-[300px] max-h-[400px] overflow-auto rounded-lg border border-border bg-background p-4 font-mono text-sm">
+          <div className="flex-1 min-h-[200px] max-h-[350px] overflow-auto rounded-lg border border-border bg-background p-3 md:p-4 font-mono text-xs md:text-sm">
             {deployLogs.map((log, index) => (
               <div 
                 key={index} 
@@ -344,13 +344,13 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
             <div ref={logsEndRef} />
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="pt-4">
             {deployComplete ? (
-              <Button onClick={handleCloseRedeployModal} variant={deploySuccess ? 'default' : 'outline'}>
+              <Button onClick={handleCloseRedeployModal} variant={deploySuccess ? 'default' : 'outline'} className="w-full sm:w-auto">
                 {deploySuccess ? 'Done' : 'Close'}
               </Button>
             ) : (
-              <Button disabled variant="outline">
+              <Button disabled variant="outline" className="w-full sm:w-auto">
                 <RefreshCw className="h-4 w-4 animate-spin mr-2" />
                 Deploying...
               </Button>
@@ -361,23 +361,23 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
 
       {/* Delete Confirmation */}
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <AlertDialogContent>
+        <AlertDialogContent className="mx-4 sm:mx-auto max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
-              Delete {app.name}?
+            <AlertDialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0" />
+              <span className="truncate">Delete {app.name}?</span>
             </AlertDialogTitle>
-            <AlertDialogDescription>
+            <AlertDialogDescription className="text-xs sm:text-sm">
               This action cannot be undone. This will permanently delete the application 
               <strong className="text-foreground"> {app.name}</strong>, stop the PM2 process, 
               and remove the Nginx configuration.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel className="w-full sm:w-auto">Cancel</AlertDialogCancel>
             <AlertDialogAction 
               onClick={handleDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="w-full sm:w-auto bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
             </AlertDialogAction>

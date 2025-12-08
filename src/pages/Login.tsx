@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Server, Lock, Mail, Eye, EyeOff, Key, UserPlus } from 'lucide-react';
+import { Lock, Mail, Eye, EyeOff, Key, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -46,28 +46,28 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 safe-area-inset">
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/4 left-1/4 w-64 md:w-96 h-64 md:h-96 bg-primary/10 rounded-full blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/4 w-64 md:w-96 h-64 md:h-96 bg-cyan-500/10 rounded-full blur-3xl" />
       </div>
 
       <div className="relative w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-primary mb-4">
-            <Server className="h-8 w-8 text-primary-foreground" />
+        <div className="text-center mb-6 md:mb-8">
+          <div className="inline-flex items-center justify-center h-14 w-14 md:h-16 md:w-16 rounded-2xl overflow-hidden bg-card mb-4">
+            <img src="/logo.png" alt="DeployHub" className="h-full w-full object-contain" />
           </div>
-          <h1 className="text-3xl font-bold text-foreground">DeployHub</h1>
-          <p className="text-muted-foreground mt-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground">DeployHub</h1>
+          <p className="text-sm md:text-base text-muted-foreground mt-2">
             {isRegisterMode ? 'Crie sua conta' : 'Acesse seu painel DevOps'}
           </p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card p-8">
-          <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="rounded-2xl border border-border bg-card p-6 md:p-8">
+          <form onSubmit={handleSubmit} className="space-y-4 md:space-y-5">
             {isRegisterMode && (
               <div className="space-y-2">
-                <Label htmlFor="name">Nome</Label>
+                <Label htmlFor="name" className="text-sm">Nome</Label>
                 <div className="relative">
                   <UserPlus className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -76,14 +76,14 @@ export default function Login() {
                     placeholder="Seu nome"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="pl-10"
+                    className="pl-10 h-11"
                   />
                 </div>
               </div>
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="text-sm">Email</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -92,14 +92,14 @@ export default function Login() {
                   placeholder="admin@deployhub.local"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="pl-10"
+                  className="pl-10 h-11"
                   required
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Senha</Label>
+              <Label htmlFor="password" className="text-sm">Senha</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -108,14 +108,14 @@ export default function Login() {
                   placeholder="••••••••"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="pl-10 pr-10"
+                  className="pl-10 pr-10 h-11"
                   required
                   minLength={isRegisterMode ? 6 : 1}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -124,7 +124,7 @@ export default function Login() {
 
             {isRegisterMode && (
               <div className="space-y-2">
-                <Label htmlFor="secret">Secret de Registro</Label>
+                <Label htmlFor="secret" className="text-sm">Secret de Registro</Label>
                 <div className="relative">
                   <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -133,7 +133,7 @@ export default function Login() {
                     placeholder="Digite o secret de autorização"
                     value={formData.secret}
                     onChange={(e) => setFormData({ ...formData, secret: e.target.value })}
-                    className="pl-10"
+                    className="pl-10 h-11"
                     required
                   />
                 </div>
@@ -143,7 +143,7 @@ export default function Login() {
               </div>
             )}
 
-            <Button type="submit" variant="gradient" className="w-full" size="lg" disabled={isLoading}>
+            <Button type="submit" variant="gradient" className="w-full h-11 md:h-12 text-base" disabled={isLoading}>
               {isLoading 
                 ? (isRegisterMode ? 'Criando conta...' : 'Entrando...') 
                 : (isRegisterMode ? 'Criar Conta' : 'Entrar')
@@ -151,11 +151,11 @@ export default function Login() {
             </Button>
           </form>
 
-          <div className="mt-6 text-center">
+          <div className="mt-5 md:mt-6 text-center">
             <button
               type="button"
               onClick={toggleMode}
-              className="text-sm text-muted-foreground hover:text-primary transition-colors"
+              className="text-sm text-muted-foreground hover:text-primary transition-colors py-2"
             >
               {isRegisterMode 
                 ? 'Já tem uma conta? Faça login' 
@@ -165,8 +165,8 @@ export default function Login() {
           </div>
         </div>
 
-        <div className="mt-6 text-center">
-          <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+        <div className="mt-5 md:mt-6 text-center">
+          <div className="inline-flex items-center gap-2 text-xs md:text-sm text-muted-foreground">
             <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
             <span>Conectado a</span>
             <span className="font-mono text-foreground">62.72.9.22</span>
