@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { formatDistanceToNow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { 
   Play, 
   Square, 
@@ -14,7 +16,8 @@ import {
   AlertTriangle,
   Settings,
   Loader2,
-  TrendingUp
+  TrendingUp,
+  RefreshCcw
 } from 'lucide-react';
 import { App, AppStatus, AppType } from '@/types/app';
 import { cn } from '@/lib/utils';
@@ -66,9 +69,10 @@ const typeConfig: Record<AppType, { label: string; color: string }> = {
 interface AppCardProps {
   app: App;
   onRefresh?: () => void;
+  lastUpdated?: Date;
 }
 
-export function AppCard({ app, onRefresh }: AppCardProps) {
+export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
   const [isRedeploying, setIsRedeploying] = useState(false);
   const [showRedeployModal, setShowRedeployModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -77,10 +81,24 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
   const [deployLogs, setDeployLogs] = useState<string[]>([]);
   const [deployComplete, setDeployComplete] = useState(false);
   const [deploySuccess, setDeploySuccess] = useState(false);
+  const [timeSinceUpdate, setTimeSinceUpdate] = useState('');
   const logsEndRef = useRef<HTMLDivElement>(null);
   
   const status = statusConfig[app.status] || statusConfig.stopped;
   const type = typeConfig[app.type] || { label: app.type || 'Unknown', color: 'bg-muted text-muted-foreground' };
+
+  // Update time since last update
+  useEffect(() => {
+    if (!lastUpdated) return;
+    
+    const updateTime = () => {
+      setTimeSinceUpdate(formatDistanceToNow(lastUpdated, { addSuffix: true, locale: ptBR }));
+    };
+    
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, [lastUpdated]);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -318,9 +336,17 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-border px-3 md:px-4 py-2 md:py-3 text-[10px] md:text-xs text-muted-foreground">
-          <span className="truncate">Last deploy: {app.lastDeploy || 'Never'}</span>
-          <span className="font-mono flex-shrink-0 ml-2">{app.currentVersion?.slice(0, 12) || 'N/A'}</span>
+        <div className="flex flex-col border-t border-border px-3 md:px-4 py-2 md:py-3 text-[10px] md:text-xs text-muted-foreground gap-1">
+          <div className="flex items-center justify-between">
+            <span className="truncate">Last deploy: {app.lastDeploy || 'Never'}</span>
+            <span className="font-mono flex-shrink-0 ml-2">{app.currentVersion?.slice(0, 12) || 'N/A'}</span>
+          </div>
+          {timeSinceUpdate && (
+            <div className="flex items-center gap-1 text-[9px] md:text-[10px] text-muted-foreground/70">
+              <RefreshCcw className="h-2.5 w-2.5" />
+              <span>Atualizado {timeSinceUpdate}</span>
+            </div>
+          )}
         </div>
       </div>
 
