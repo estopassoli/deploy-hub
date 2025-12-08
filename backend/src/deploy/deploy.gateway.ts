@@ -35,8 +35,8 @@ export class DeployGateway {
     });
   }
 
-  emitDeployLog(appName: string, message: string) {
-    this.server.to(`deploy:${appName}`).emit('deploy:log', { appName, message });
+  emitDeployLog(appName: string, message: string, phase?: string) {
+    this.server.to(`deploy:${appName}`).emit('deploy:log', { appName, message, phase });
   }
 
   emitDeployComplete(appName: string, success: boolean, data?: any) {
