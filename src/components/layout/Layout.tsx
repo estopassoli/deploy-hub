@@ -13,7 +13,7 @@ export function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-background">
       {/* Mobile Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 flex h-14 items-center justify-between border-b border-border bg-sidebar px-4 md:hidden">
+      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between border-b border-border bg-sidebar px-4 pt-[env(safe-area-inset-top)] h-[calc(3.5rem+env(safe-area-inset-top))] md:hidden">
         <div className="flex items-center gap-2">
           <img src="/logo.png" alt="DeployHub" className="h-8 w-8 rounded-lg" />
           <span className="font-semibold text-foreground">DeployHub</span>
@@ -39,7 +39,7 @@ export function Layout({ children }: LayoutProps) {
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       {/* Main Content */}
-      <main className="pt-14 md:pt-0 md:pl-64">
+      <main className="pt-[calc(3.5rem+env(safe-area-inset-top))] md:pt-0 md:pl-64 pb-[env(safe-area-inset-bottom)]">
         <div className="p-4 md:p-8">
           {children}
         </div>

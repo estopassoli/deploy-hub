@@ -84,6 +84,13 @@
   code, pre, .font-mono {
     font-family: 'JetBrains Mono', monospace;
   }
+
+  /* Prevent iOS zoom on input focus - must be 16px minimum */
+  @supports (-webkit-touch-callout: none) {
+    input, textarea, select, button {
+      font-size: 16px;
+    }
+  }
 }
 
 @layer utilities {
