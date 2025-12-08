@@ -56,18 +56,7 @@ const DEPLOY_PHASES: { key: DeployPhase; label: string; icon: string; estimatedS
   { key: 'configuring', label: 'Configurando', icon: 'Settings', estimatedSeconds: 20 },
 ];
 
-function detectPhase(logs: string[]): DeployPhase {
-  const allLogs = logs.join('\n').toLowerCase();
-  
-  if (allLogs.includes('nginx') || allLogs.includes('ssl') || allLogs.includes('certbot')) return 'configuring';
-  if (allLogs.includes('pm2') || allLogs.includes('starting app') || allLogs.includes('start command')) return 'starting';
-  if (allLogs.includes('prisma') || allLogs.includes('migrate')) return 'migrating';
-  if (allLogs.includes('build') || allLogs.includes('compil') || allLogs.includes('nest build') || allLogs.includes('next build')) return 'building';
-  if (allLogs.includes('npm ci') || allLogs.includes('npm install') || allLogs.includes('installing dep')) return 'installing';
-  if (allLogs.includes('clone') || allLogs.includes('git')) return 'cloning';
-  
-  return 'cloning';
-}
+// Phase is now sent by backend via WebSocket
 
 function calculateTimeRemaining(currentPhase: DeployPhase, phaseStartTime: number): { minutes: number; seconds: number; percentage: number } {
   const currentIndex = DEPLOY_PHASES.findIndex(p => p.key === currentPhase);
@@ -115,9 +104,8 @@ export default function Deploy() {
   const [errorMessage, setErrorMessage] = useState('');
   const [phaseStartTime, setPhaseStartTime] = useState<number>(Date.now());
   const [timeRemaining, setTimeRemaining] = useState({ minutes: 0, seconds: 0, percentage: 0 });
+  const [currentPhase, setCurrentPhase] = useState<DeployPhase>('cloning');
   const logsEndRef = useRef<HTMLDivElement>(null);
-  
-  const currentPhase = detectPhase(deployLogs);
 
   // Update phase start time when phase changes
   useEffect(() => {
@@ -191,10 +179,14 @@ export default function Deploy() {
     // Subscribe to WebSocket BEFORE starting deploy
     const socket = getSocket();
     
-    const handleDeployLog = (data: { appName: string; message: string }) => {
+    const handleDeployLog = (data: { appName: string; message: string; phase?: string }) => {
       console.log('Deploy log received:', data);
       if (data.appName === formData.name) {
         setDeployLogs(prev => [...prev, data.message]);
+        // Update phase from backend
+        if (data.phase) {
+          setCurrentPhase(data.phase as DeployPhase);
+        }
       }
     };
 
@@ -231,6 +223,7 @@ export default function Deploy() {
     socket.emit('subscribe-deploy', { appName: formData.name });
 
     setStep('deploying');
+    setCurrentPhase('cloning');
     setDeployLogs([
       '▶ Starting deploy process...',
       `  Repository: ${formData.repository}`,

@@ -23,10 +23,12 @@ export class DeployService {
 
   // Store logs per deploy for persistence
   private deployLogs: Map<string, string[]> = new Map();
+  private currentPhase: Map<string, string> = new Map();
 
   private log(appName: string, message: string, deployId?: string) {
     console.log(`[${appName}] ${message}`);
-    this.deployGateway.emitDeployLog(appName, message);
+    const phase = this.currentPhase.get(appName) || 'cloning';
+    this.deployGateway.emitDeployLog(appName, message, phase);
 
     // Accumulate logs for persistence
     if (deployId) {
@@ -35,6 +37,10 @@ export class DeployService {
       }
       this.deployLogs.get(deployId)!.push(`[${new Date().toISOString()}] ${message}`);
     }
+  }
+
+  private setPhase(appName: string, phase: string) {
+    this.currentPhase.set(appName, phase);
   }
 
   private async persistLogs(deployId: string) {
@@ -239,6 +245,7 @@ export class DeployService {
       await fs.promises.mkdir(path.join(APPS_DIR, app.name, 'releases'), { recursive: true });
 
       // Clone repository
+      this.setPhase(app.name, 'cloning');
       this.log(app.name, '▶ Cloning repository...', deploy.id);
       this.log(app.name, `  ${app.repository}`, deploy.id);
       this.log(app.name, `  Branch: ${app.branch}`, deploy.id);
@@ -265,6 +272,7 @@ export class DeployService {
       }
 
       // Install dependencies with auto-recovery (pass env vars)
+      this.setPhase(app.name, 'installing');
       this.log(app.name, '▶ Installing dependencies...', deploy.id);
       await this.installDependencies(releaseDir, app.name, options.installCommand, deploy.id, envVarsObj);
       this.log(app.name, '✓ Dependencies installed', deploy.id);
@@ -272,6 +280,7 @@ export class DeployService {
       // Check for Prisma - run migrations if custom migrate command OR prisma detected
       const hasPrisma = fs.existsSync(path.join(releaseDir, 'prisma', 'schema.prisma'));
       if (hasPrisma || options.migrateCommand) {
+        this.setPhase(app.name, 'migrating');
         if (hasPrisma) {
           this.log(app.name, '▶ Generating Prisma client...', deploy.id);
           await this.runCommand('npx prisma generate', releaseDir, app.name, deploy.id, envVarsObj);
@@ -320,6 +329,7 @@ export class DeployService {
       }
 
       // Build - use custom command if provided (and not empty), or npx nest build for NestJS, npm run build for others
+      this.setPhase(app.name, 'building');
       let buildCmd = options.buildCommand?.trim();
       if (!buildCmd) {
         buildCmd = app.type === 'nestjs' ? 'npx nest build' : 'npm run build';
@@ -334,6 +344,7 @@ export class DeployService {
       this.log(app.name, `✓ ${currentLink} → ${releaseDir}`, deploy.id);
 
       // Start/restart PM2 (not for static) - include env vars in PM2 config
+      this.setPhase(app.name, 'starting');
       if (app.type !== 'vitejs') {
         this.log(app.name, '▶ Starting PM2 process...', deploy.id);
         const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj, options.startCommand);
@@ -361,6 +372,7 @@ export class DeployService {
       }
 
       // Update Nginx
+      this.setPhase(app.name, 'configuring');
       this.log(app.name, '▶ Configuring Nginx...', deploy.id);
       await this.updateNginxConfig(app);
       this.log(app.name, `✓ Nginx configured${app.domain ? ` for ${app.domain}` : ''}`, deploy.id);
