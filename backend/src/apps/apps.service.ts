@@ -306,13 +306,42 @@ export class AppsService {
       const uptimeMs = Date.now() - proc.pm2_env.pm_uptime;
       const uptime = this.formatUptime(uptimeMs);
 
+      // Get real-time CPU and memory using ps command for more accurate values
+      const pid = proc.pid;
+      let cpu = 0;
+      let memory = 0;
+
+      if (pid) {
+        try {
+          // Use ps to get real CPU and memory usage
+          const { stdout: psOutput } = await execAsync(`ps -p ${pid} -o %cpu,%mem --no-headers`);
+          const parts = psOutput.trim().split(/\s+/);
+          if (parts.length >= 2) {
+            cpu = parseFloat(parts[0]) || 0;
+            // Memory from PM2 monit is more accurate (in bytes)
+            memory = Math.round((proc.monit?.memory || 0) / 1024 / 1024);
+          }
+        } catch (psError) {
+          // Fallback to PM2 monit values
+          cpu = proc.monit?.cpu || 0;
+          memory = Math.round((proc.monit?.memory || 0) / 1024 / 1024);
+        }
+      } else {
+        cpu = proc.monit?.cpu || 0;
+        memory = Math.round((proc.monit?.memory || 0) / 1024 / 1024);
+      }
+
+      // Round CPU to 1 decimal place
+      cpu = Math.round(cpu * 10) / 10;
+
       return {
         status: proc.pm2_env.status === 'online' ? 'running' : proc.pm2_env.status,
         uptime,
-        cpu: proc.monit?.cpu || 0,
-        memory: Math.round((proc.monit?.memory || 0) / 1024 / 1024),
+        cpu,
+        memory,
       };
-    } catch {
+    } catch (error) {
+      console.error(`[PM2 Status] Error for ${appName}:`, error);
       return { status: 'stopped', uptime: '-', cpu: 0, memory: 0 };
     }
   }
