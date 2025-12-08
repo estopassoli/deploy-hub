@@ -6,6 +6,11 @@ import * as os from 'os';
 
 const execAsync = promisify(exec);
 
+interface UpdateEmailSettingsDto {
+  emailEnabled: boolean;
+  emailRecipient?: string;
+}
+
 @Injectable()
 export class SystemService {
   constructor(private prisma: PrismaService) {}
@@ -32,6 +37,51 @@ export class SystemService {
       cpuUsage,
       memoryUsage,
       diskUsage,
+    };
+  }
+
+  async getSettings() {
+    let settings = await this.prisma.systemSettings.findFirst();
+    
+    if (!settings) {
+      settings = await this.prisma.systemSettings.create({
+        data: {
+          emailEnabled: false,
+          emailRecipient: null,
+        },
+      });
+    }
+
+    return {
+      emailEnabled: settings.emailEnabled,
+      emailRecipient: settings.emailRecipient,
+      slackWebhook: settings.slackWebhook,
+    };
+  }
+
+  async updateEmailSettings(dto: UpdateEmailSettingsDto) {
+    let settings = await this.prisma.systemSettings.findFirst();
+
+    if (!settings) {
+      settings = await this.prisma.systemSettings.create({
+        data: {
+          emailEnabled: dto.emailEnabled,
+          emailRecipient: dto.emailRecipient || null,
+        },
+      });
+    } else {
+      settings = await this.prisma.systemSettings.update({
+        where: { id: settings.id },
+        data: {
+          emailEnabled: dto.emailEnabled,
+          emailRecipient: dto.emailRecipient || null,
+        },
+      });
+    }
+
+    return {
+      emailEnabled: settings.emailEnabled,
+      emailRecipient: settings.emailRecipient,
     };
   }
 

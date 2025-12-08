@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployGateway } from '../deploy/deploy.gateway';
+import { EmailService } from '../email/email.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -16,6 +17,7 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private prisma: PrismaService,
     private deployGateway: DeployGateway,
+    private emailService: EmailService,
   ) {}
 
   onModuleInit() {
@@ -56,6 +58,9 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
         if (previousStatus === 'online' && currentStatus !== 'online') {
           console.log(`[MetricsService] App ${app.name} stopped unexpectedly`);
           this.deployGateway.emitAppStopped(app.name, 'Process exited unexpectedly');
+          
+          // Send email notification for app stopped
+          this.emailService.notifyAppStopped(app.name, 'Process exited unexpectedly').catch(console.error);
           
           // Update app status in database
           await this.prisma.app.update({

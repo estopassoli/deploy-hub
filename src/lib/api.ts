@@ -218,6 +218,17 @@ class ApiClient {
     return this.request<{ status: string; timestamp: string }>('/system/health');
   }
 
+  async getSettings() {
+    return this.request<{ emailEnabled: boolean; emailRecipient: string | null; slackWebhook: string | null }>('/system/settings');
+  }
+
+  async updateEmailSettings(data: { emailEnabled: boolean; emailRecipient?: string }) {
+    return this.request<{ emailEnabled: boolean; emailRecipient: string | null }>('/system/settings/email', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Metrics
   async getAppMetrics(appId: string, hours: number = 1) {
     return this.request<Array<{ cpu: number; memory: number; time: string }>>(`/metrics/${appId}?hours=${hours}`);
