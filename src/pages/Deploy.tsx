@@ -1,5 +1,3 @@
-import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,21 +9,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { 
-  GitBranch, 
-  Rocket, 
-  Server, 
-  Globe, 
+import api from '@/lib/api';
+import { cn } from '@/lib/utils';
+import { getConnectedSocket, getSocket } from '@/lib/websocket';
+import {
   AlertCircle,
   CheckCircle2,
+  GitBranch,
+  Globe,
   Loader2,
-  XCircle,
-  ShieldCheck
+  Rocket,
+  Server,
+  ShieldCheck,
+  XCircle
 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
-import api from '@/lib/api';
-import { getConnectedSocket, getSocket } from '@/lib/websocket';
 
 type DeployStep = 'config' | 'deploying' | 'complete' | 'error';
 
