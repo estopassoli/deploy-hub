@@ -36,31 +36,31 @@ export class TerminalGateway {
 
     try {
       // Execute command using bash
-      const process = spawn('bash', ['-c', command], {
+      const childProcess = spawn('bash', ['-c', command], {
         cwd: process.env.HOME || '/root',
         env: { ...process.env, TERM: 'xterm-256color' },
       });
 
-      this.activeProcesses.set(client.id, process);
+      this.activeProcesses.set(client.id, childProcess);
 
       // Handle stdout
-      process.stdout.on('data', (data: Buffer) => {
+      childProcess.stdout.on('data', (data: Buffer) => {
         client.emit('terminal:output', { output: data.toString() });
       });
 
       // Handle stderr
-      process.stderr.on('data', (data: Buffer) => {
+      childProcess.stderr.on('data', (data: Buffer) => {
         client.emit('terminal:output', { output: data.toString(), isError: true });
       });
 
       // Handle process exit
-      process.on('close', (code: number) => {
+      childProcess.on('close', (code: number) => {
         this.activeProcesses.delete(client.id);
         client.emit('terminal:complete', { exitCode: code || 0 });
       });
 
       // Handle process error
-      process.on('error', (error: Error) => {
+      childProcess.on('error', (error: Error) => {
         client.emit('terminal:output', { output: `Erro: ${error.message}`, isError: true });
         client.emit('terminal:complete', { exitCode: 1 });
         this.activeProcesses.delete(client.id);
@@ -81,9 +81,9 @@ export class TerminalGateway {
   }
 
   private killProcess(clientId: string) {
-    const process = this.activeProcesses.get(clientId);
-    if (process) {
-      process.kill('SIGTERM');
+    const proc = this.activeProcesses.get(clientId);
+    if (proc) {
+      proc.kill('SIGTERM');
       this.activeProcesses.delete(clientId);
     }
   }
