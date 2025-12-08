@@ -72,9 +72,15 @@ export default function Deploy() {
 
   // Listen for deploy logs via WebSocket
   useEffect(() => {
+    if (step !== 'deploying' || !formData.name) return;
+
     const socket = getSocket();
     
+    // Subscribe to deploy logs for this app
+    socket.emit('subscribe-deploy', { appName: formData.name });
+    
     const handleDeployLog = (data: { appName: string; message: string }) => {
+      console.log('Deploy log received:', data);
       if (data.appName === formData.name) {
         setDeployLogs(prev => [...prev, data.message]);
       }
@@ -84,8 +90,9 @@ export default function Deploy() {
 
     return () => {
       socket.off('deploy:log', handleDeployLog);
+      socket.emit('unsubscribe-deploy');
     };
-  }, [formData.name]);
+  }, [step, formData.name]);
 
   const handlePortChange = async (value: string) => {
     setFormData({ ...formData, port: value });
