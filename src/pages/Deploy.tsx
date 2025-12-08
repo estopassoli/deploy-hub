@@ -144,7 +144,8 @@ export default function Deploy() {
 
   // Listen for deploy logs via WebSocket
   useEffect(() => {
-    if (step !== 'deploying' || !formData.name) return;
+    // Continue listening for logs during deploying and error states
+    if ((step !== 'deploying' && step !== 'error') || !formData.name) return;
 
     const socket = getSocket();
     
@@ -158,10 +159,24 @@ export default function Deploy() {
       }
     };
 
+    // Listen for deploy completion
+    const handleDeployComplete = (data: { appName: string; success: boolean; error?: string }) => {
+      if (data.appName === formData.name) {
+        if (data.success) {
+          setStep('complete');
+        } else {
+          setErrorMessage(data.error || 'Deploy failed');
+          setStep('error');
+        }
+      }
+    };
+
     socket.on('deploy:log', handleDeployLog);
+    socket.on('deploy:complete', handleDeployComplete);
 
     return () => {
       socket.off('deploy:log', handleDeployLog);
+      socket.off('deploy:complete', handleDeployComplete);
       socket.emit('unsubscribe-deploy');
     };
   }, [step, formData.name]);
