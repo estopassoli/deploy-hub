@@ -46,49 +46,115 @@ fi
 
 echo -e "${GREEN}✓ Git disponível${NC}"
 
-# Definir diretório de instalação
-INSTALL_DIR="/root/deployhub"
+# Detectar diretório atual do script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Perguntar URL do repositório
-echo ""
-echo -e "${CYAN}📦 Configuração do Repositório${NC}"
-echo ""
-read -p "Insira a URL do repositório Git (ex: https://github.com/usuario/deployhub.git): " REPO_URL
-
-while [[ -z "$REPO_URL" ]]; do
-    echo -e "${YELLOW}⚠ A URL do repositório é obrigatória!${NC}"
-    read -p "Insira a URL do repositório Git: " REPO_URL
-done
-
-# Perguntar branch
-read -p "Branch a ser usado (padrão: main): " BRANCH
-BRANCH="${BRANCH:-main}"
-
-# Limpar instalação anterior se existir
-if [[ -d "$INSTALL_DIR" ]]; then
+# Verificar se já está dentro de um repositório DeployHub
+if [[ -d "$SCRIPT_DIR/.git" ]] && [[ -f "$SCRIPT_DIR/package.json" ]] && [[ -d "$SCRIPT_DIR/backend" ]]; then
     echo ""
-    read -p "⚠ Diretório $INSTALL_DIR já existe. Deseja sobrescrever? [s/N]: " OVERWRITE
-    if [[ "$OVERWRITE" =~ ^[Ss]$ ]]; then
-        echo -e "${YELLOW}Removendo instalação anterior...${NC}"
-        rm -rf "$INSTALL_DIR"
-    else
-        echo -e "${RED}Instalação cancelada.${NC}"
-        exit 1
+    echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║       Repositório DeployHub Detectado Localmente!        ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${CYAN}Diretório encontrado:${NC} $SCRIPT_DIR"
+    
+    # Mostrar informações do repositório
+    cd "$SCRIPT_DIR"
+    if git remote -v &>/dev/null; then
+        REPO_URL=$(git remote get-url origin 2>/dev/null || echo "Não configurado")
+        CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "Desconhecido")
+        echo -e "${CYAN}Repositório remoto:${NC} $REPO_URL"
+        echo -e "${CYAN}Branch atual:${NC} $CURRENT_BRANCH"
     fi
+    echo ""
+    
+    read -p "Deseja usar este repositório local para a instalação? [S/n]: " USE_LOCAL
+    if [[ ! "$USE_LOCAL" =~ ^[Nn]$ ]]; then
+        INSTALL_DIR="$SCRIPT_DIR"
+        echo -e "${GREEN}✓ Usando repositório local: $INSTALL_DIR${NC}"
+        
+        # Perguntar se quer atualizar
+        read -p "Deseja fazer git pull para atualizar o repositório? [s/N]: " DO_PULL
+        if [[ "$DO_PULL" =~ ^[Ss]$ ]]; then
+            echo -e "${CYAN}📥 Atualizando repositório...${NC}"
+            git pull origin "$CURRENT_BRANCH"
+            echo -e "${GREEN}✓ Repositório atualizado${NC}"
+        fi
+    else
+        # Usuário não quer usar o repositório local
+        echo ""
+        echo -e "${CYAN}📦 Configuração de Novo Repositório${NC}"
+        echo ""
+        read -p "Insira a URL do repositório Git (ex: https://github.com/usuario/deployhub.git): " REPO_URL
+        
+        while [[ -z "$REPO_URL" ]]; do
+            echo -e "${YELLOW}⚠ A URL do repositório é obrigatória!${NC}"
+            read -p "Insira a URL do repositório Git: " REPO_URL
+        done
+        
+        read -p "Branch a ser usado (padrão: main): " BRANCH
+        BRANCH="${BRANCH:-main}"
+        
+        INSTALL_DIR="/root/deployhub"
+        
+        if [[ -d "$INSTALL_DIR" ]]; then
+            echo ""
+            read -p "⚠ Diretório $INSTALL_DIR já existe. Deseja sobrescrever? [s/N]: " OVERWRITE
+            if [[ "$OVERWRITE" =~ ^[Ss]$ ]]; then
+                echo -e "${YELLOW}Removendo instalação anterior...${NC}"
+                rm -rf "$INSTALL_DIR"
+            else
+                echo -e "${RED}Instalação cancelada.${NC}"
+                exit 1
+            fi
+        fi
+        
+        echo ""
+        echo -e "${CYAN}📥 Clonando repositório...${NC}"
+        git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR"
+        echo -e "${GREEN}✓ Repositório clonado com sucesso${NC}"
+    fi
+else
+    # Não está em um repositório, pedir para clonar
+    INSTALL_DIR="/root/deployhub"
+    
+    echo ""
+    echo -e "${CYAN}📦 Configuração do Repositório${NC}"
+    echo ""
+    read -p "Insira a URL do repositório Git (ex: https://github.com/usuario/deployhub.git): " REPO_URL
+    
+    while [[ -z "$REPO_URL" ]]; do
+        echo -e "${YELLOW}⚠ A URL do repositório é obrigatória!${NC}"
+        read -p "Insira a URL do repositório Git: " REPO_URL
+    done
+    
+    read -p "Branch a ser usado (padrão: main): " BRANCH
+    BRANCH="${BRANCH:-main}"
+    
+    if [[ -d "$INSTALL_DIR" ]]; then
+        echo ""
+        read -p "⚠ Diretório $INSTALL_DIR já existe. Deseja sobrescrever? [s/N]: " OVERWRITE
+        if [[ "$OVERWRITE" =~ ^[Ss]$ ]]; then
+            echo -e "${YELLOW}Removendo instalação anterior...${NC}"
+            rm -rf "$INSTALL_DIR"
+        else
+            echo -e "${RED}Instalação cancelada.${NC}"
+            exit 1
+        fi
+    fi
+    
+    echo ""
+    echo -e "${CYAN}📥 Clonando repositório...${NC}"
+    git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR"
+    echo -e "${GREEN}✓ Repositório clonado com sucesso${NC}"
 fi
 
-# Clonar repositório
-echo ""
-echo -e "${CYAN}📥 Clonando repositório...${NC}"
-git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$INSTALL_DIR"
-
+# Verificar se setup.sh existe
 if [[ ! -f "$INSTALL_DIR/backend/setup.sh" ]]; then
     echo -e "${RED}✗ Arquivo setup.sh não encontrado no repositório!${NC}"
     echo -e "${RED}  Verifique se o repositório contém a pasta backend/setup.sh${NC}"
     exit 1
 fi
-
-echo -e "${GREEN}✓ Repositório clonado com sucesso${NC}"
 
 # Executar script de instalação principal
 echo ""
