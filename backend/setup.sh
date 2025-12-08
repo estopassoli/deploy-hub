@@ -349,7 +349,7 @@ EOF
     # Gerar cliente Prisma e rodar migrations
     print_info "Configurando banco de dados..."
     npx prisma generate
-    npx prisma migrate deploy 2>/dev/null || npx prisma migrate dev --name init
+    npx prisma db push 2>/dev/null
     
     # Criar usuário admin
     print_info "Criando usuário admin..."

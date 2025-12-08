@@ -75,7 +75,7 @@ print_success "Prisma Client gerado"
 
 # 6. Executar migrações do banco
 print_status "Executando migrações do banco de dados..."
-npx prisma migrate deploy
+npx prisma db push
 print_success "Migrações aplicadas"
 
 # 7. Build do Backend
