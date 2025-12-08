@@ -13,12 +13,14 @@ import {
   RefreshCw,
   AlertTriangle,
   Settings,
-  Loader2
+  Loader2,
+  TrendingUp
 } from 'lucide-react';
 import { App, AppStatus, AppType } from '@/types/app';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { AppConfigModal } from './AppConfigModal';
+import { AppMetricsChart } from './AppMetricsChart';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,6 +73,7 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
   const [showRedeployModal, setShowRedeployModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [showMetricsModal, setShowMetricsModal] = useState(false);
   const [deployLogs, setDeployLogs] = useState<string[]>([]);
   const [deployComplete, setDeployComplete] = useState(false);
   const [deploySuccess, setDeploySuccess] = useState(false);
@@ -212,6 +215,12 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
                 <Settings className="h-4 w-4" />
                 Configurações
               </DropdownMenuItem>
+              {app.type !== 'vitejs' && (
+                <DropdownMenuItem onClick={() => setShowMetricsModal(true)} className="flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4" />
+                  Métricas
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem 
                 onClick={handleRedeploy} 
@@ -396,6 +405,14 @@ export function AppCard({ app, onRefresh }: AppCardProps) {
         open={showConfigModal}
         onOpenChange={setShowConfigModal}
         onSaved={onRefresh}
+      />
+
+      {/* Metrics Modal */}
+      <AppMetricsChart
+        appId={app.id}
+        appName={app.name}
+        open={showMetricsModal}
+        onOpenChange={setShowMetricsModal}
       />
     </>
   );

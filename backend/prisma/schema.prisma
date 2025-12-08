@@ -17,23 +17,24 @@ model User {
 }
 
 model App {
-  id              String    @id @default(uuid())
-  name            String    @unique
-  type            String    // nestjs, nextjs, vitejs
-  port            Int       @unique
+  id              String      @id @default(uuid())
+  name            String      @unique
+  type            String      // nestjs, nextjs, vitejs
+  port            Int         @unique
   domain          String?
   repository      String
-  branch          String    @default("main")
-  status          String    @default("stopped") // running, stopped, error, deploying
+  branch          String      @default("main")
+  status          String      @default("stopped") // running, stopped, error, deploying
   currentPath     String?
-  envVars         String?   // Environment variables stored for redeploy
-  installCommand  String?   // Custom install command (optional)
-  buildCommand    String?   // Custom build command (optional)
-  migrateCommand  String?   // Custom migrate command (optional)
-  startCommand    String?   // Custom start command (optional)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  envVars         String?     // Environment variables stored for redeploy
+  installCommand  String?     // Custom install command (optional)
+  buildCommand    String?     // Custom build command (optional)
+  migrateCommand  String?     // Custom migrate command (optional)
+  startCommand    String?     // Custom start command (optional)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
   deploys         Deploy[]
+  metrics         AppMetric[]
   webhookSecret   String?
 }
 
@@ -58,6 +59,17 @@ model SystemLog {
   source    String?
   appId     String?
   createdAt DateTime @default(now())
+}
+
+model AppMetric {
+  id        String   @id @default(uuid())
+  appId     String
+  app       App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+  cpu       Float    @default(0)
+  memory    Float    @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([appId, createdAt])
 }
 
 model Setting {
