@@ -28,9 +28,9 @@ export default function Dashboard() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadData = useCallback(async (showLoader = false) => {
+    if (showLoader) setIsLoading(true);
+    
     try {
-      if (showLoader) setIsLoading(true);
-      
       // Use Promise.allSettled to prevent one failing request from blocking others
       const [appsResult, statsResult, logsResult] = await Promise.allSettled([
         api.getApps(),
@@ -38,8 +38,12 @@ export default function Dashboard() {
         api.getSystemLogs({ limit: 10 }),
       ]);
       
+      console.log('Apps result:', appsResult);
+      console.log('Stats result:', statsResult);
+      
       if (appsResult.status === 'fulfilled') {
-        setApps(appsResult.value);
+        console.log('Setting apps:', appsResult.value);
+        setApps(appsResult.value || []);
       } else {
         console.error('Failed to load apps:', appsResult.reason);
       }
@@ -51,19 +55,19 @@ export default function Dashboard() {
       }
       
       if (logsResult.status === 'fulfilled') {
-        setLogs(logsResult.value);
+        setLogs(logsResult.value || []);
       } else {
         console.error('Failed to load logs:', logsResult.reason);
       }
       
       setLastUpdated(new Date());
     } catch (error: any) {
+      console.error('Dashboard refresh error:', error);
       if (showLoader) {
         toast.error(error.message || 'Erro ao carregar dados');
       }
-      console.error('Dashboard refresh error:', error);
     } finally {
-      if (showLoader) setIsLoading(false);
+      setIsLoading(false);
     }
   }, []);
 
