@@ -44,12 +44,23 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
 
       for (const app of apps) {
         const proc = pm2Data.find((p: any) => p.name === app.name);
-        if (proc && proc.pm2_env?.status === 'online') {
+        if (proc && proc.pm2_env?.status === 'online' && proc.pid) {
+          // Get real-time CPU using ps command
+          let cpu = 0;
+          let memory = Math.round((proc.monit?.memory || 0) / 1024 / 1024);
+          
+          try {
+            const { stdout: psOutput } = await execAsync(`ps -p ${proc.pid} -o %cpu --no-headers`);
+            cpu = parseFloat(psOutput.trim()) || 0;
+          } catch {
+            cpu = proc.monit?.cpu || 0;
+          }
+
           await this.prisma.appMetric.create({
             data: {
               appId: app.id,
-              cpu: proc.monit?.cpu || 0,
-              memory: Math.round((proc.monit?.memory || 0) / 1024 / 1024),
+              cpu: Math.round(cpu * 10) / 10,
+              memory,
             },
           });
         }
