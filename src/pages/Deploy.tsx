@@ -205,6 +205,13 @@ export default function Deploy() {
     setErrorMessage('');
   };
 
+  const retryDeploy = () => {
+    setStep('config');
+    setDeployLogs([]);
+    setDeployResult(null);
+    setErrorMessage('');
+  };
+
   return (
     <Layout>
       <div className="mx-auto max-w-3xl">
@@ -510,7 +517,7 @@ export default function Deploy() {
 
             {step === 'error' && (
               <div className="flex justify-end gap-4">
-                <Button variant="outline" onClick={resetForm}>
+                <Button variant="outline" onClick={retryDeploy}>
                   Try Again
                 </Button>
                 <Button variant="default" onClick={() => navigate('/')}>
