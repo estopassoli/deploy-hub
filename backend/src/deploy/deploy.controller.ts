@@ -33,6 +33,18 @@ class DeployDto {
 
   @IsOptional()
   @IsString()
+  buildCommand?: string;
+
+  @IsOptional()
+  @IsString()
+  migrateCommand?: string;
+
+  @IsOptional()
+  @IsString()
+  startCommand?: string;
+
+  @IsOptional()
+  @IsString()
   envVars?: string;
 
   @IsOptional()
