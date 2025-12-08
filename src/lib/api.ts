@@ -217,6 +217,11 @@ class ApiClient {
   async healthCheck() {
     return this.request<{ status: string; timestamp: string }>('/system/health');
   }
+
+  // Metrics
+  async getAppMetrics(appId: string, hours: number = 1) {
+    return this.request<Array<{ cpu: number; memory: number; time: string }>>(`/metrics/${appId}?hours=${hours}`);
+  }
 }
 
 export const api = new ApiClient();

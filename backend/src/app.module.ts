@@ -7,6 +7,7 @@ import { DeployModule } from './deploy/deploy.module';
 import { LogsModule } from './logs/logs.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { SystemModule } from './system/system.module';
+import { MetricsModule } from './metrics/metrics.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SystemModule } from './system/system.module';
     LogsModule,
     WebhookModule,
     SystemModule,
+    MetricsModule,
   ],
 })
 export class AppModule {}
