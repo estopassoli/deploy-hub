@@ -291,8 +291,8 @@ export class DeployService {
         }
       }
 
-      // For NestJS projects, ensure required dev dependencies are available for build
-      if (app.type === 'nestjs' && !options.buildCommand) {
+      // For NestJS projects, ensure required dev dependencies are available for build (only if using default nest build)
+      if (app.type === 'nestjs' && !options.buildCommand?.trim()) {
         const missingDeps: string[] = [];
         
         // Check for @nestjs/cli
@@ -317,8 +317,8 @@ export class DeployService {
         }
       }
 
-      // Build - use custom command if provided, or npx nest build for NestJS, npm run build for others
-      let buildCmd = options.buildCommand;
+      // Build - use custom command if provided (and not empty), or npx nest build for NestJS, npm run build for others
+      let buildCmd = options.buildCommand?.trim();
       if (!buildCmd) {
         buildCmd = app.type === 'nestjs' ? 'npx nest build' : 'npm run build';
       }
