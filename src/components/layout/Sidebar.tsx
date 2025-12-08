@@ -11,6 +11,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
+import { NotificationSettings } from '@/components/NotificationSettings';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -103,6 +104,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
               <p className="text-sm font-medium text-foreground truncate">{user?.name || 'Admin'}</p>
               <p className="text-xs text-muted-foreground truncate">{user?.email || 'admin@deploy.hub'}</p>
             </div>
+            <NotificationSettings compact className="hidden md:flex" />
             <Button variant="ghost" size="icon-sm" onClick={logout}>
               <LogOut className="h-4 w-4" />
             </Button>

@@ -40,7 +40,25 @@ export class DeployGateway {
   }
 
   emitDeployComplete(appName: string, success: boolean, data?: any) {
-    this.server.to(`deploy:${appName}`).emit('deploy:complete', { appName, success, data });
+    // Emit to specific room and broadcast globally for notifications
+    this.server.to(`deploy:${appName}`).emit('deploy:complete', { 
+      appName, 
+      success, 
+      version: data?.version,
+      error: data?.error,
+    });
+    
+    // Also emit to all connected clients for push notifications
+    this.server.emit('deploy:complete', { 
+      appName, 
+      success, 
+      version: data?.version,
+      error: data?.error,
+    });
+  }
+
+  emitAppStopped(appName: string, reason?: string) {
+    this.server.emit('app:stopped', { appName, reason });
   }
 
   handleDisconnect(client: Socket) {
