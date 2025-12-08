@@ -2,7 +2,7 @@ import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { MetricsService } from './metrics.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-@Controller('api/metrics')
+@Controller('metrics')
 @UseGuards(JwtAuthGuard)
 export class MetricsController {
   constructor(private metricsService: MetricsService) {}
