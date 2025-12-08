@@ -291,6 +291,16 @@ export class DeployService {
         }
       }
 
+      // For NestJS projects, ensure @nestjs/cli is installed (may not be in devDependencies)
+      if (app.type === 'nestjs') {
+        const hasNestCli = fs.existsSync(path.join(releaseDir, 'node_modules', '@nestjs', 'cli'));
+        if (!hasNestCli) {
+          this.log(app.name, '▶ Installing @nestjs/cli (not found in dependencies)...', deploy.id);
+          await this.runCommand('npm install --save-dev @nestjs/cli', releaseDir, app.name, deploy.id, envVarsObj);
+          this.log(app.name, '✓ @nestjs/cli installed', deploy.id);
+        }
+      }
+
       // Build - use custom command if provided, otherwise use npm run build (respects package.json scripts)
       const buildCmd = options.buildCommand || 'npm run build';
       this.log(app.name, `▶ Building ${app.type} application...`, deploy.id);
