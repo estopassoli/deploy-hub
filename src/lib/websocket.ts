@@ -5,42 +5,62 @@ const WS_URL = import.meta.env.VITE_WS_URL || 'https://api-panel.auraai.chat';
 class WebSocketClient {
   private socket: Socket | null = null;
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
+  private connectionPromise: Promise<Socket> | null = null;
 
-  connect() {
-    if (this.socket?.connected) return;
+  connect(): Promise<Socket> {
+    if (this.socket?.connected) {
+      return Promise.resolve(this.socket);
+    }
 
-    this.socket = io(WS_URL, {
-      transports: ['websocket'],
-      autoConnect: true,
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
+
+    this.connectionPromise = new Promise((resolve) => {
+      this.socket = io(WS_URL, {
+        transports: ['websocket'],
+        autoConnect: true,
+      });
+
+      this.socket.on('connect', () => {
+        console.log('WebSocket connected');
+        resolve(this.socket!);
+      });
+
+      this.socket.on('disconnect', () => {
+        console.log('WebSocket disconnected');
+        this.connectionPromise = null;
+      });
+
+      this.socket.on('log', (data) => {
+        this.emit('log', data);
+      });
+
+      this.socket.on('log-error', (data) => {
+        this.emit('log-error', data);
+      });
+
+      // If already connected (edge case)
+      if (this.socket.connected) {
+        resolve(this.socket);
+      }
     });
 
-    this.socket.on('connect', () => {
-      console.log('WebSocket connected');
-    });
-
-    this.socket.on('disconnect', () => {
-      console.log('WebSocket disconnected');
-    });
-
-    this.socket.on('log', (data) => {
-      this.emit('log', data);
-    });
-
-    this.socket.on('log-error', (data) => {
-      this.emit('log-error', data);
-    });
+    return this.connectionPromise;
   }
 
   disconnect() {
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
+      this.connectionPromise = null;
     }
   }
 
   subscribeLogs(appName: string) {
-    if (!this.socket) this.connect();
-    this.socket?.emit('subscribe-logs', { appName });
+    this.connect().then(socket => {
+      socket.emit('subscribe-logs', { appName });
+    });
   }
 
   unsubscribeLogs() {
@@ -61,13 +81,22 @@ class WebSocketClient {
   private emit(event: string, data: any) {
     this.listeners.get(event)?.forEach((callback) => callback(data));
   }
+
+  getSocket(): Socket | null {
+    return this.socket;
+  }
+
+  async getConnectedSocket(): Promise<Socket> {
+    return this.connect();
+  }
 }
 
 export const wsClient = new WebSocketClient();
 export const getSocket = () => {
-  if (!wsClient['socket']) {
+  if (!wsClient.getSocket()) {
     wsClient.connect();
   }
-  return wsClient['socket']!;
+  return wsClient.getSocket()!;
 };
+export const getConnectedSocket = () => wsClient.getConnectedSocket();
 export default wsClient;

@@ -30,7 +30,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import api from '@/lib/api';
-import { getSocket } from '@/lib/websocket';
+import { getConnectedSocket, getSocket } from '@/lib/websocket';
 
 type DeployStep = 'config' | 'deploying' | 'complete' | 'error';
 type DeployPhase = 'cloning' | 'installing' | 'building' | 'migrating' | 'starting' | 'configuring' | 'done';
@@ -176,8 +176,9 @@ export default function Deploy() {
   };
 
   const handleDeploy = async () => {
-    // Subscribe to WebSocket BEFORE starting deploy
-    const socket = getSocket();
+    // Ensure WebSocket is connected BEFORE starting deploy
+    const socket = await getConnectedSocket();
+    console.log('WebSocket connected, subscribing to deploy logs for:', formData.name);
     
     const handleDeployLog = (data: { appName: string; message: string; phase?: string }) => {
       console.log('Deploy log received:', data);
@@ -191,6 +192,7 @@ export default function Deploy() {
     };
 
     const handleDeployComplete = (data: { appName: string; success: boolean; error?: string; version?: string }) => {
+      console.log('Deploy complete received:', data);
       if (data.appName === formData.name) {
         if (data.success) {
           setDeployLogs(prev => [
@@ -221,6 +223,9 @@ export default function Deploy() {
     socket.on('deploy:log', handleDeployLog);
     socket.on('deploy:complete', handleDeployComplete);
     socket.emit('subscribe-deploy', { appName: formData.name });
+    
+    // Small delay to ensure subscription is registered on server
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     setStep('deploying');
     setCurrentPhase('cloning');
