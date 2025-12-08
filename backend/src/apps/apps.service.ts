@@ -220,7 +220,44 @@ export class AppsService {
     }
 
     try {
-      await execAsync(`pm2 start ${app.name}`);
+      // First try to start if process exists in PM2
+      const { stdout: pm2List } = await execAsync('pm2 jlist');
+      const processes = JSON.parse(pm2List);
+      const existsInPM2 = processes.some((p: any) => p.name === app.name);
+
+      if (existsInPM2) {
+        // Process exists, just start it
+        await execAsync(`pm2 start ${app.name}`);
+      } else {
+        // Process doesn't exist in PM2, need to start from path
+        const currentPath = app.currentPath || path.join(APPS_DIR, app.name, 'current');
+        
+        // Check if the current symlink/directory exists
+        try {
+          await fs.promises.access(currentPath, fs.constants.F_OK);
+        } catch {
+          throw new Error(`App directory not found: ${currentPath}. Deploy the app first.`);
+        }
+
+        // Determine start command based on app type
+        let startCmd: string;
+        const cwd = currentPath;
+
+        if (app.startCommand) {
+          // Use custom start command if configured
+          startCmd = `pm2 start "npm" --name "${app.name}" --cwd "${cwd}" -- run start`;
+        } else if (app.type === 'nextjs') {
+          startCmd = `pm2 start "node_modules/.bin/next" --name "${app.name}" --cwd "${cwd}" -- start --port ${app.port}`;
+        } else if (app.type === 'nestjs') {
+          startCmd = `pm2 start "npm" --name "${app.name}" --cwd "${cwd}" -- run start:prod`;
+        } else {
+          startCmd = `pm2 start "npm" --name "${app.name}" --cwd "${cwd}" -- run start`;
+        }
+
+        await execAsync(startCmd);
+      }
+
+      await execAsync('pm2 save');
       await this.prisma.app.update({ where: { id }, data: { status: 'running' } });
       return { success: true };
     } catch (error) {
