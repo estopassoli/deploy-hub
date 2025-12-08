@@ -1,11 +1,11 @@
-import { Controller, Post, Get, Body, Headers, Param, RawBodyRequest, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, RawBodyRequest, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
-import { WebhookService } from './webhook.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { WebhookService } from './webhook.service';
 
 @Controller('webhook')
 export class WebhookController {
-  constructor(private webhookService: WebhookService) {}
+  constructor(private webhookService: WebhookService) { }
 
   @Post('github/:appName')
   async handleGitHubWebhook(
@@ -22,8 +22,11 @@ export class WebhookController {
   @UseGuards(JwtAuthGuard)
   @Get('github/workflow/:appId')
   async getGitHubWorkflow(@Param('appId') appId: string) {
-    const sshHost = process.env.SSH_HOST || '62.72.9.22';
+    const sshHost = process.env.SSH_HOST;
     const sshUser = process.env.SSH_USER || 'root';
+    if (!sshHost) {
+      return;
+    }
     return this.webhookService.generateGitHubActionsWorkflow(appId, sshHost, sshUser);
   }
 

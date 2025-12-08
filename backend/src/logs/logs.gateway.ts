@@ -1,15 +1,15 @@
 import {
-    OnGatewayConnection,
-    OnGatewayDisconnect,
-    WebSocketGateway,
-    WebSocketServer,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+  WebSocketGateway,
+  WebSocketServer,
 } from '@nestjs/websockets';
 import { spawn } from 'child_process';
 import { Server, Socket } from 'socket.io';
 
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:10000', 'http://62.72.9.22:10000', 'https://deployhub.example.com'],
+    origin: "*",
     credentials: true,
   },
 })

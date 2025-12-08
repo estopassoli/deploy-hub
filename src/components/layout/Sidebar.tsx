@@ -1,19 +1,19 @@
-import { Link, useLocation } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Rocket, 
-  ScrollText, 
-  Settings, 
-  History,
-  Github,
-  LogOut,
-  Terminal
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { NotificationHistoryPanel } from '@/components/NotificationHistoryPanel';
+import { NotificationSettings } from '@/components/NotificationSettings';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { NotificationSettings } from '@/components/NotificationSettings';
-import { NotificationHistoryPanel } from '@/components/NotificationHistoryPanel';
+import { cn } from '@/lib/utils';
+import {
+  Github,
+  History,
+  LayoutDashboard,
+  LogOut,
+  Rocket,
+  ScrollText,
+  Settings,
+  Terminal
+} from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -91,7 +91,6 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
               <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
               <span>Server Online</span>
             </div>
-            <p className="mt-1 font-mono text-sm text-foreground">62.72.9.22</p>
           </div>
         </div>
 

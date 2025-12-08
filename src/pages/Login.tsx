@@ -1,29 +1,29 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Lock, Mail, Eye, EyeOff, Key, UserPlus } from 'lucide-react';
-import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { Eye, EyeOff, Key, Lock, Mail, UserPlus } from 'lucide-react';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 
 export default function Login() {
   const navigate = useNavigate();
   const { login, register } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
-  const [formData, setFormData] = useState({ 
-    email: '', 
-    password: '', 
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
     name: '',
-    secret: '' 
+    secret: ''
   });
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     try {
       if (isRegisterMode) {
         await register(formData.email, formData.password, formData.name, formData.secret);
@@ -144,8 +144,8 @@ export default function Login() {
             )}
 
             <Button type="submit" variant="gradient" className="w-full h-11 md:h-12 text-base" disabled={isLoading}>
-              {isLoading 
-                ? (isRegisterMode ? 'Criando conta...' : 'Entrando...') 
+              {isLoading
+                ? (isRegisterMode ? 'Criando conta...' : 'Entrando...')
                 : (isRegisterMode ? 'Criar Conta' : 'Entrar')
               }
             </Button>
@@ -157,19 +157,11 @@ export default function Login() {
               onClick={toggleMode}
               className="text-sm text-muted-foreground hover:text-primary transition-colors py-2"
             >
-              {isRegisterMode 
-                ? 'Já tem uma conta? Faça login' 
+              {isRegisterMode
+                ? 'Já tem uma conta? Faça login'
                 : 'Precisa de uma conta? Cadastre-se'
               }
             </button>
-          </div>
-        </div>
-
-        <div className="mt-5 md:mt-6 text-center">
-          <div className="inline-flex items-center gap-2 text-xs md:text-sm text-muted-foreground">
-            <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
-            <span>Conectado a</span>
-            <span className="font-mono text-foreground">62.72.9.22</span>
           </div>
         </div>
       </div>

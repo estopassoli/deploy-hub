@@ -1,28 +1,28 @@
-import { useState, useEffect } from 'react';
 import { Layout } from '@/components/layout/Layout';
+import { NotificationSettings } from '@/components/NotificationSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { NotificationSettings } from '@/components/NotificationSettings';
-import { 
-  Server,
-  Shield,
+import { Switch } from '@/components/ui/switch';
+import { api } from '@/lib/api';
+import {
   Bell,
   Database,
-  Trash2,
-  Save,
-  RefreshCw,
+  Loader2,
   Mail,
-  Loader2
+  RefreshCw,
+  Save,
+  Server,
+  Shield,
+  Trash2
 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { api } from '@/lib/api';
 
 export default function Settings() {
   const [settings, setSettings] = useState({
-    serverIp: '62.72.9.22',
+    serverIp: '',
     backendPort: '10001',
     frontendPort: '10000',
     appsPath: '~/apps',
