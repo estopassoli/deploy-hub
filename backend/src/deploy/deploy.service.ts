@@ -291,13 +291,24 @@ export class DeployService {
         }
       }
 
-      // For NestJS projects, ensure @nestjs/cli is available for build
+      // For NestJS projects, ensure required dev dependencies are available for build
       if (app.type === 'nestjs' && !options.buildCommand) {
-        const hasNestCli = fs.existsSync(path.join(releaseDir, 'node_modules', '.bin', 'nest'));
-        if (!hasNestCli) {
-          this.log(app.name, '▶ Installing @nestjs/cli (required for build)...', deploy.id);
-          await this.runCommand('npm install --save-dev @nestjs/cli', releaseDir, app.name, deploy.id, envVarsObj);
-          this.log(app.name, '✓ @nestjs/cli installed', deploy.id);
+        const missingDeps: string[] = [];
+        
+        // Check for @nestjs/cli
+        if (!fs.existsSync(path.join(releaseDir, 'node_modules', '.bin', 'nest'))) {
+          missingDeps.push('@nestjs/cli');
+        }
+        
+        // Check for @types/node (required for process.env)
+        if (!fs.existsSync(path.join(releaseDir, 'node_modules', '@types', 'node'))) {
+          missingDeps.push('@types/node');
+        }
+        
+        if (missingDeps.length > 0) {
+          this.log(app.name, `▶ Installing missing dev dependencies: ${missingDeps.join(', ')}...`, deploy.id);
+          await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')}`, releaseDir, app.name, deploy.id, envVarsObj);
+          this.log(app.name, '✓ Dev dependencies installed', deploy.id);
         }
       }
 
