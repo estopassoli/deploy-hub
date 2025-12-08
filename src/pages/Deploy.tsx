@@ -20,7 +20,12 @@ import {
   CheckCircle2,
   Loader2,
   XCircle,
-  ShieldCheck
+  ShieldCheck,
+  Package,
+  Hammer,
+  Database,
+  Play,
+  Settings
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -28,6 +33,7 @@ import api from '@/lib/api';
 import { getSocket } from '@/lib/websocket';
 
 type DeployStep = 'config' | 'deploying' | 'complete' | 'error';
+type DeployPhase = 'cloning' | 'installing' | 'building' | 'migrating' | 'starting' | 'configuring' | 'done';
 
 interface DeployResult {
   success: boolean;
@@ -39,6 +45,28 @@ interface DeployResult {
     path: string;
     status: string;
   };
+}
+
+const DEPLOY_PHASES: { key: DeployPhase; label: string; icon: string }[] = [
+  { key: 'cloning', label: 'Clonando', icon: 'GitBranch' },
+  { key: 'installing', label: 'Instalando', icon: 'Package' },
+  { key: 'building', label: 'Buildando', icon: 'Hammer' },
+  { key: 'migrating', label: 'Migrando', icon: 'Database' },
+  { key: 'starting', label: 'Iniciando', icon: 'Play' },
+  { key: 'configuring', label: 'Configurando', icon: 'Settings' },
+];
+
+function detectPhase(logs: string[]): DeployPhase {
+  const allLogs = logs.join('\n').toLowerCase();
+  
+  if (allLogs.includes('nginx') || allLogs.includes('ssl') || allLogs.includes('certbot')) return 'configuring';
+  if (allLogs.includes('pm2') || allLogs.includes('starting app') || allLogs.includes('start command')) return 'starting';
+  if (allLogs.includes('prisma') || allLogs.includes('migrate')) return 'migrating';
+  if (allLogs.includes('build') || allLogs.includes('compil') || allLogs.includes('nest build') || allLogs.includes('next build')) return 'building';
+  if (allLogs.includes('npm ci') || allLogs.includes('npm install') || allLogs.includes('installing dep')) return 'installing';
+  if (allLogs.includes('clone') || allLogs.includes('git')) return 'cloning';
+  
+  return 'cloning';
 }
 
 export default function Deploy() {
@@ -64,6 +92,8 @@ export default function Deploy() {
   const [deployResult, setDeployResult] = useState<DeployResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const logsEndRef = useRef<HTMLDivElement>(null);
+  
+  const currentPhase = detectPhase(deployLogs);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -491,6 +521,72 @@ export default function Deploy() {
         {/* Deploying */}
         {(step === 'deploying' || step === 'error') && (
           <div className="space-y-4">
+            {/* Phase Progress Indicator */}
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-medium">Progresso do Deploy</span>
+                {step === 'deploying' && (
+                  <span className="text-xs text-primary flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Em andamento...
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-1">
+                {DEPLOY_PHASES.map((phase, index) => {
+                  const phaseIndex = DEPLOY_PHASES.findIndex(p => p.key === currentPhase);
+                  const isActive = phase.key === currentPhase;
+                  const isComplete = index < phaseIndex;
+                  const isPending = index > phaseIndex;
+                  
+                  const IconComponent = {
+                    GitBranch,
+                    Package,
+                    Hammer,
+                    Database,
+                    Play,
+                    Settings,
+                  }[phase.icon] || Server;
+                  
+                  return (
+                    <div key={phase.key} className="flex flex-col items-center flex-1">
+                      <div className={cn(
+                        'flex h-10 w-10 items-center justify-center rounded-full transition-all duration-300',
+                        isActive && 'bg-primary text-primary-foreground ring-4 ring-primary/20',
+                        isComplete && 'bg-success text-success-foreground',
+                        isPending && 'bg-secondary text-muted-foreground',
+                        step === 'error' && isActive && 'bg-destructive text-destructive-foreground ring-4 ring-destructive/20'
+                      )}>
+                        {isComplete ? (
+                          <CheckCircle2 className="h-5 w-5" />
+                        ) : isActive && step === 'deploying' ? (
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                        ) : step === 'error' && isActive ? (
+                          <XCircle className="h-5 w-5" />
+                        ) : (
+                          <IconComponent className="h-5 w-5" />
+                        )}
+                      </div>
+                      <span className={cn(
+                        'text-xs mt-2 text-center',
+                        isActive && 'text-primary font-medium',
+                        isComplete && 'text-success',
+                        isPending && 'text-muted-foreground'
+                      )}>
+                        {phase.label}
+                      </span>
+                      {index < DEPLOY_PHASES.length - 1 && (
+                        <div className={cn(
+                          'absolute h-0.5 w-full top-5 left-1/2',
+                          isComplete ? 'bg-success' : 'bg-border'
+                        )} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Deploy Info Card */}
             <div className="rounded-xl border border-border bg-card p-4">
               <div className="flex items-center gap-2 mb-3">
