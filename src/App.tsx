@@ -11,6 +11,7 @@ import Logs from "./pages/Logs";
 import Versions from "./pages/Versions";
 import GitHub from "./pages/GitHub";
 import Settings from "./pages/Settings";
+import Terminal from "./pages/Terminal";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -31,6 +32,7 @@ const App = () => (
             <Route path="/versions" element={<ProtectedRoute><Versions /></ProtectedRoute>} />
             <Route path="/github" element={<ProtectedRoute><GitHub /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            <Route path="/terminal" element={<ProtectedRoute><Terminal /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
