@@ -3,8 +3,14 @@
 # ============================================
 # DeployHub - Script de Instalação Completa
 # ============================================
-# Execute: curl -sSL https://raw.githubusercontent.com/seu-repo/deployhub/main/setup.sh | bash
-# Ou: bash setup.sh
+# 
+# INSTALAÇÃO RÁPIDA (via curl):
+# curl -sSL https://raw.githubusercontent.com/SEU-USUARIO/SEU-REPO/main/install.sh | sudo bash
+#
+# OU execute localmente após clonar:
+# sudo bash backend/setup.sh
+#
+# ============================================
 
 set -e
 
@@ -24,7 +30,17 @@ INSTALL_USER="root"
 INSTALL_DEPS=true
 USE_SEPARATE_USER=false
 HOME_DIR="/root"
-DEPLOYHUB_DIR=""
+
+# Detectar diretório do script (suporta execução de qualquer lugar)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOYHUB_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Se estiver rodando de dentro do backend, ajustar
+if [[ "$(basename "$SCRIPT_DIR")" == "backend" ]]; then
+    DEPLOYHUB_DIR="$SCRIPT_DIR/.."
+fi
+
+DEPLOYHUB_DIR="$(cd "$DEPLOYHUB_DIR" && pwd)"
 
 # Funções de utilidade
 print_header() {
@@ -141,10 +157,17 @@ create_user() {
         chmod 440 /etc/sudoers.d/deployhub
         
         HOME_DIR="/home/$INSTALL_USER"
+        
+        # Mover DeployHub para o diretório do usuário
+        if [[ "$DEPLOYHUB_DIR" != "$HOME_DIR/deployhub" ]]; then
+            print_info "Movendo DeployHub para $HOME_DIR/deployhub..."
+            mv "$DEPLOYHUB_DIR" "$HOME_DIR/deployhub"
+            DEPLOYHUB_DIR="$HOME_DIR/deployhub"
+        fi
+        
+        chown -R "$INSTALL_USER:$INSTALL_USER" "$DEPLOYHUB_DIR"
         print_success "Permissões configuradas"
     fi
-    
-    DEPLOYHUB_DIR="$HOME_DIR/deployhub"
 }
 
 # Instalar dependências do sistema
