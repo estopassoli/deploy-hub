@@ -215,20 +215,31 @@ export default function Deploy() {
         generateSSL: formData.generateSSL,
       });
 
-      setDeployResult(result);
-      // Note: completion is now handled by WebSocket event
-    } catch (error: any) {
-      // Only handle immediate errors (network issues, etc)
-      // The actual deploy errors come via WebSocket
-      if (!error.message?.includes('Deploy')) {
-        setErrorMessage(error.message || 'Deploy failed');
+      // If we get a result with success: false, handle as error
+      if (result && result.success === false) {
+        const errorMsg = result.error || result.message || 'Deploy failed';
+        setErrorMessage(errorMsg);
         addLog('');
-        addLog(`❌ Request failed: ${error.message}`);
+        addLog(`❌ Deploy failed: ${errorMsg}`);
         setStep('error');
-        toast.error(error.message || 'Deploy failed');
+        toast.error(errorMsg);
         socket.off('deploy:log', handleDeployLog);
         socket.off('deploy:complete', handleDeployComplete);
+        return;
       }
+
+      setDeployResult(result);
+      // Note: success completion is handled by WebSocket event
+    } catch (error: any) {
+      // Handle ALL API errors - this means the deploy failed
+      const errorMsg = error.response?.data?.message || error.message || 'Deploy failed';
+      setErrorMessage(errorMsg);
+      addLog('');
+      addLog(`❌ Deploy failed: ${errorMsg}`);
+      setStep('error');
+      toast.error(errorMsg);
+      socket.off('deploy:log', handleDeployLog);
+      socket.off('deploy:complete', handleDeployComplete);
     }
   };
 
