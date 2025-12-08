@@ -56,6 +56,12 @@ print_status "Compilando frontend..."
 npm run build
 print_success "Frontend compilado"
 
+# 4. Copiar build para /var/www
+print_status "Atualizando arquivos em /var/www/deployhub-panel..."
+sudo rm -rf /var/www/deployhub-panel/*
+sudo cp -r dist/* /var/www/deployhub-panel/
+print_success "Arquivos do frontend atualizados"
+
 # 4. Atualizar dependências do Backend
 print_status "Atualizando dependências do backend..."
 cd "$DEPLOYHUB_DIR/backend"
