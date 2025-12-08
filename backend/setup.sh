@@ -34,6 +34,7 @@ HOME_DIR="/root"
 # Detectar diretório do script (suporta execução de qualquer lugar)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOYHUB_DIR="$(dirname "$SCRIPT_DIR")"
+USING_LOCAL_REPO=false
 
 # Se estiver rodando de dentro do backend, ajustar
 if [[ "$(basename "$SCRIPT_DIR")" == "backend" ]]; then
@@ -41,6 +42,58 @@ if [[ "$(basename "$SCRIPT_DIR")" == "backend" ]]; then
 fi
 
 DEPLOYHUB_DIR="$(cd "$DEPLOYHUB_DIR" && pwd)"
+
+# Detectar se está em um repositório Git
+detect_repository() {
+    if [[ -d "$DEPLOYHUB_DIR/.git" ]] && [[ -f "$DEPLOYHUB_DIR/package.json" ]] && [[ -d "$DEPLOYHUB_DIR/backend" ]]; then
+        echo ""
+        echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║       Repositório DeployHub Detectado Localmente!        ║${NC}"
+        echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${CYAN}Diretório encontrado:${NC} $DEPLOYHUB_DIR"
+        
+        # Mostrar informações do repositório
+        cd "$DEPLOYHUB_DIR"
+        if git remote -v &>/dev/null; then
+            REPO_URL=$(git remote get-url origin 2>/dev/null || echo "Não configurado")
+            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "Desconhecido")
+            echo -e "${CYAN}Repositório remoto:${NC} $REPO_URL"
+            echo -e "${CYAN}Branch atual:${NC} $CURRENT_BRANCH"
+        fi
+        echo ""
+        
+        read -p "Deseja usar este repositório local para a instalação? [S/n]: " USE_LOCAL
+        if [[ ! "$USE_LOCAL" =~ ^[Nn]$ ]]; then
+            USING_LOCAL_REPO=true
+            print_success "Usando repositório local: $DEPLOYHUB_DIR"
+            return 0
+        else
+            print_info "Você optou por não usar o repositório local."
+            read -p "Deseja clonar um repositório diferente? [s/N]: " CLONE_NEW
+            if [[ "$CLONE_NEW" =~ ^[Ss]$ ]]; then
+                read -p "URL do repositório Git: " NEW_REPO_URL
+                read -p "Diretório de destino (padrão: /root/deployhub): " NEW_DEST_DIR
+                NEW_DEST_DIR="${NEW_DEST_DIR:-/root/deployhub}"
+                
+                if [[ -d "$NEW_DEST_DIR" ]]; then
+                    read -p "Diretório já existe. Sobrescrever? [s/N]: " OVERWRITE
+                    if [[ "$OVERWRITE" =~ ^[Ss]$ ]]; then
+                        rm -rf "$NEW_DEST_DIR"
+                    else
+                        print_error "Instalação cancelada."
+                        exit 1
+                    fi
+                fi
+                
+                git clone "$NEW_REPO_URL" "$NEW_DEST_DIR"
+                DEPLOYHUB_DIR="$NEW_DEST_DIR"
+                USING_LOCAL_REPO=true
+                print_success "Repositório clonado em: $DEPLOYHUB_DIR"
+            fi
+        fi
+    fi
+}
 
 # Funções de utilidade
 print_header() {
@@ -547,12 +600,13 @@ EOF
 # Função principal
 main() {
     check_root
+    detect_repository
     collect_info
     create_user
     install_dependencies
     create_directories
     
-    # Clonar repositório (ou copiar arquivos se já existirem)
+    # Verificar se os arquivos existem (caso não tenha usado repositório local)
     if [[ ! -d "$DEPLOYHUB_DIR/backend" ]]; then
         print_header "📥 Preparando Arquivos"
         print_warning "Por favor, copie os arquivos do DeployHub para: $DEPLOYHUB_DIR"
