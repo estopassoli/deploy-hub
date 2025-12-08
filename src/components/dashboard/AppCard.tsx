@@ -178,6 +178,16 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
     }
   };
 
+  const handleStart = async () => {
+    try {
+      await api.startApp(app.id);
+      toast.success(`Starting ${app.name}...`);
+      onRefresh?.();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to start');
+    }
+  };
+
   const handleDelete = async () => {
     try {
       await api.deleteApp(app.id);
@@ -249,14 +259,23 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
                 {isRedeploying ? 'Redeploying...' : 'Pull & Redeploy'}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleRestart} className="flex items-center gap-2">
-                <Play className="h-4 w-4" />
-                Restart
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleStop} className="flex items-center gap-2">
-                <Square className="h-4 w-4" />
-                Stop
-              </DropdownMenuItem>
+              {app.status === 'stopped' ? (
+                <DropdownMenuItem onClick={handleStart} className="flex items-center gap-2 text-success focus:text-success focus:bg-success/10">
+                  <Play className="h-4 w-4" />
+                  Start
+                </DropdownMenuItem>
+              ) : (
+                <>
+                  <DropdownMenuItem onClick={handleRestart} className="flex items-center gap-2">
+                    <RotateCcw className="h-4 w-4" />
+                    Restart
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleStop} className="flex items-center gap-2">
+                    <Square className="h-4 w-4" />
+                    Stop
+                  </DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem 
                 onClick={() => setShowDeleteConfirm(true)} 
