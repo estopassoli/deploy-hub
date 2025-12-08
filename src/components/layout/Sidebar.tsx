@@ -6,7 +6,8 @@ import {
   Settings, 
   History,
   Github,
-  LogOut
+  LogOut,
+  Terminal
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,7 @@ const navigation = [
   { name: 'Deploy', href: '/deploy', icon: Rocket },
   { name: 'Logs', href: '/logs', icon: ScrollText },
   { name: 'Versions', href: '/versions', icon: History },
+  { name: 'Terminal', href: '/terminal', icon: Terminal },
   { name: 'GitHub Actions', href: '/github', icon: Github },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];

@@ -9,6 +9,7 @@ import { WebhookModule } from './webhook/webhook.module';
 import { SystemModule } from './system/system.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { EmailModule } from './email/email.module';
+import { TerminalModule } from './terminal/terminal.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { EmailModule } from './email/email.module';
     SystemModule,
     MetricsModule,
     EmailModule,
+    TerminalModule,
   ],
 })
 export class AppModule {}
