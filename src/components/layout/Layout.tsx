@@ -2,6 +2,8 @@ import { ReactNode, useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { NotificationSettings } from '@/components/NotificationSettings';
+import { useNotifications } from '@/hooks/useNotifications';
 
 interface LayoutProps {
   children: ReactNode;
@@ -9,6 +11,9 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+  // Initialize notifications listener
+  useNotifications();
 
   return (
     <div className="min-h-screen bg-background">
@@ -18,13 +23,16 @@ export function Layout({ children }: LayoutProps) {
           <img src="/logo.png" alt="DeployHub" className="h-8 w-8 rounded-lg" />
           <span className="font-semibold text-foreground">DeployHub</span>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-        >
-          {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </Button>
+        <div className="flex items-center gap-1">
+          <NotificationSettings compact />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
+            {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </Button>
+        </div>
       </header>
 
       {/* Mobile Overlay */}

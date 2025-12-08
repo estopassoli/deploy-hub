@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import { NotificationSettings } from '@/components/NotificationSettings';
 import { 
   Server,
   Shield,
@@ -154,6 +155,10 @@ export default function Settings() {
             </div>
             
             <div className="space-y-4">
+              <NotificationSettings />
+
+              <Separator />
+
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium text-foreground">Email Notifications</p>

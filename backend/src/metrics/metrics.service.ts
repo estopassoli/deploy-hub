@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { DeployGateway } from '../deploy/deploy.gateway';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -10,8 +11,12 @@ const RETENTION_HOURS = 24; // Keep 24 hours of data
 @Injectable()
 export class MetricsService implements OnModuleInit, OnModuleDestroy {
   private collectInterval: NodeJS.Timeout | null = null;
+  private previousAppStatuses: Map<string, string> = new Map();
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private deployGateway: DeployGateway,
+  ) {}
 
   onModuleInit() {
     // Start collecting metrics periodically
@@ -44,6 +49,34 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
 
       for (const app of apps) {
         const proc = pm2Data.find((p: any) => p.name === app.name);
+        const previousStatus = this.previousAppStatuses.get(app.id);
+        const currentStatus = proc?.pm2_env?.status;
+        
+        // Detect if app stopped unexpectedly
+        if (previousStatus === 'online' && currentStatus !== 'online') {
+          console.log(`[MetricsService] App ${app.name} stopped unexpectedly`);
+          this.deployGateway.emitAppStopped(app.name, 'Process exited unexpectedly');
+          
+          // Update app status in database
+          await this.prisma.app.update({
+            where: { id: app.id },
+            data: { status: 'stopped' },
+          });
+          
+          // Log to system logs
+          await this.prisma.systemLog.create({
+            data: {
+              level: 'error',
+              message: `Aplicação ${app.name} parou inesperadamente`,
+              source: 'monitor',
+              appId: app.id,
+            },
+          });
+        }
+        
+        // Update previous status
+        this.previousAppStatuses.set(app.id, currentStatus || 'stopped');
+        
         if (proc && proc.pm2_env?.status === 'online' && proc.pid) {
           // Get real-time CPU using ps command
           let cpu = 0;
