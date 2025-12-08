@@ -293,7 +293,7 @@ export default function Deploy() {
 
   return (
     <Layout>
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-3xl overflow-hidden">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground">New Deploy</h1>
@@ -589,7 +589,7 @@ export default function Deploy() {
                   />
                 </div>
               )}
-              <div className="flex items-center justify-between gap-1">
+              <div className="flex items-center justify-between gap-1 overflow-hidden">
                 {DEPLOY_PHASES.map((phase, index) => {
                   const phaseIndex = DEPLOY_PHASES.findIndex(p => p.key === currentPhase);
                   const isActive = phase.key === currentPhase;
@@ -606,9 +606,9 @@ export default function Deploy() {
                   }[phase.icon] || Server;
                   
                   return (
-                    <div key={phase.key} className="flex flex-col items-center flex-1">
+                    <div key={phase.key} className="flex flex-col items-center flex-1 min-w-0">
                       <div className={cn(
-                        'flex h-10 w-10 items-center justify-center rounded-full transition-all duration-300',
+                        'flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all duration-300',
                         isActive && 'bg-primary text-primary-foreground ring-4 ring-primary/20',
                         isComplete && 'bg-success text-success-foreground',
                         isPending && 'bg-secondary text-muted-foreground',
@@ -625,19 +625,13 @@ export default function Deploy() {
                         )}
                       </div>
                       <span className={cn(
-                        'text-xs mt-2 text-center',
+                        'text-xs mt-2 text-center truncate w-full',
                         isActive && 'text-primary font-medium',
                         isComplete && 'text-success',
                         isPending && 'text-muted-foreground'
                       )}>
                         {phase.label}
                       </span>
-                      {index < DEPLOY_PHASES.length - 1 && (
-                        <div className={cn(
-                          'absolute h-0.5 w-full top-5 left-1/2',
-                          isComplete ? 'bg-success' : 'bg-border'
-                        )} />
-                      )}
                     </div>
                   );
                 })}
