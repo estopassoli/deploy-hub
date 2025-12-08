@@ -3,25 +3,25 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from '@/components/ui/select';
 import api from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { getConnectedSocket, getSocket } from '@/lib/websocket';
 import {
-  AlertCircle,
-  CheckCircle2,
-  GitBranch,
-  Globe,
-  Loader2,
-  Rocket,
-  Server,
-  ShieldCheck,
-  XCircle
+    AlertCircle,
+    CheckCircle2,
+    GitBranch,
+    Globe,
+    Loader2,
+    Rocket,
+    Server,
+    ShieldCheck,
+    XCircle
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -86,6 +86,7 @@ export default function Deploy() {
   const [deployResult, setDeployResult] = useState<DeployResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const deployCompletionRef = useRef(false);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -148,9 +149,43 @@ export default function Deploy() {
   };
 
   const handleDeploy = async () => {
+    deployCompletionRef.current = false;
     // Ensure WebSocket is connected BEFORE starting deploy
     const socket = await getConnectedSocket();
     console.log('WebSocket connected, subscribing to deploy logs for:', formData.name);
+    const cleanupSocketListeners = () => {
+      socket.off('deploy:log', handleDeployLog);
+      socket.off('deploy:complete', handleDeployComplete);
+      socket.emit('unsubscribe-deploy');
+    };
+
+    const finalizeDeploy = (
+      success: boolean,
+      details?: { version?: string; error?: string; source?: 'ws' | 'http' | 'api-error' }
+    ) => {
+      if (deployCompletionRef.current) return;
+      deployCompletionRef.current = true;
+
+      if (success) {
+        addLog('');
+        const suffix = details?.source === 'http' ? ' (API confirmation)' : '';
+        addLog(`🚀 Deploy completed successfully${suffix}!`);
+        if (details?.version) {
+          addLog(`  Version: ${details.version}`);
+        }
+        setStep('complete');
+        toast.success('Deploy completed successfully!');
+      } else {
+        const errorText = details?.error || 'Deploy failed';
+        setErrorMessage(errorText);
+        addLog('');
+        addLog(`❌ Deploy failed: ${errorText}`);
+        setStep('error');
+        toast.error(errorText);
+      }
+
+      cleanupSocketListeners();
+    };
     
     const handleDeployLog = (data: { appName: string; message: string }) => {
       console.log('Deploy log received:', data);
@@ -162,22 +197,7 @@ export default function Deploy() {
     const handleDeployComplete = (data: { appName: string; success: boolean; error?: string; version?: string }) => {
       console.log('Deploy complete received:', data);
       if (data.appName === formData.name) {
-        if (data.success) {
-          addLog('');
-          addLog('🚀 Deploy completed successfully!');
-          addLog(`  Version: ${data.version}`);
-          setStep('complete');
-          toast.success('Deploy completed successfully!');
-        } else {
-          setErrorMessage(data.error || 'Deploy failed');
-          addLog('');
-          addLog(`❌ Deploy failed: ${data.error}`);
-          setStep('error');
-          toast.error(data.error || 'Deploy failed');
-        }
-        // Cleanup listeners after completion
-        socket.off('deploy:log', handleDeployLog);
-        socket.off('deploy:complete', handleDeployComplete);
+        finalizeDeploy(data.success, { version: data.version, error: data.error, source: 'ws' });
       }
     };
 
@@ -229,17 +249,15 @@ export default function Deploy() {
       }
 
       setDeployResult(result);
-      // Note: success completion is handled by WebSocket event
+      if (result?.success !== false) {
+        finalizeDeploy(true, { version: result?.version, source: 'http' });
+      } else {
+        finalizeDeploy(false, { error: result?.error || 'Deploy failed', source: 'http' });
+      }
     } catch (error: any) {
       // Handle ALL API errors - this means the deploy failed
       const errorMsg = error.response?.data?.message || error.message || 'Deploy failed';
-      setErrorMessage(errorMsg);
-      addLog('');
-      addLog(`❌ Deploy failed: ${errorMsg}`);
-      setStep('error');
-      toast.error(errorMsg);
-      socket.off('deploy:log', handleDeployLog);
-      socket.off('deploy:complete', handleDeployComplete);
+      finalizeDeploy(false, { error: errorMsg, source: 'api-error' });
     }
   };
 
@@ -272,6 +290,7 @@ export default function Deploy() {
     setDeployLogs([]);
     setDeployResult(null);
     setErrorMessage('');
+    deployCompletionRef.current = false;
   };
 
   const retryDeploy = () => {
@@ -279,6 +298,7 @@ export default function Deploy() {
     setDeployLogs([]);
     setDeployResult(null);
     setErrorMessage('');
+    deployCompletionRef.current = false;
   };
 
   return (
