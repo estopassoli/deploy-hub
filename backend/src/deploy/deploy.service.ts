@@ -328,6 +328,46 @@ export class DeployService {
         }
       }
 
+      // For Next.js projects, ensure required dev dependencies are available for build
+      if (app.type === 'nextjs') {
+        const missingDeps: string[] = [];
+        
+        // ESLint is required for Next.js builds (linting step runs during build)
+        if (!fs.existsSync(path.join(releaseDir, 'node_modules', 'eslint'))) {
+          missingDeps.push('eslint');
+        }
+        
+        // @types/node is required for TypeScript projects
+        if (!fs.existsSync(path.join(releaseDir, 'node_modules', '@types', 'node'))) {
+          missingDeps.push('@types/node');
+        }
+        
+        // Check package.json for any missing @types packages that might be needed
+        try {
+          const packageJsonPath = path.join(releaseDir, 'package.json');
+          const packageJson = JSON.parse(await fs.promises.readFile(packageJsonPath, 'utf-8'));
+          const allDeps = { ...packageJson.dependencies, ...packageJson.devDependencies };
+          
+          // Common packages that need @types
+          const typesNeeded = ['nodemailer', 'express', 'cors', 'bcrypt', 'jsonwebtoken'];
+          for (const pkg of typesNeeded) {
+            if (allDeps[pkg] && !allDeps[`@types/${pkg}`]) {
+              if (!fs.existsSync(path.join(releaseDir, 'node_modules', '@types', pkg))) {
+                missingDeps.push(`@types/${pkg}`);
+              }
+            }
+          }
+        } catch (e) {
+          // Ignore errors reading package.json
+        }
+        
+        if (missingDeps.length > 0) {
+          this.log(app.name, `▶ Installing missing dev dependencies: ${missingDeps.join(', ')}...`, deploy.id);
+          await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')}`, releaseDir, app.name, deploy.id, envVarsObj);
+          this.log(app.name, '✓ Dev dependencies installed', deploy.id);
+        }
+      }
+
       // Build - use custom command if provided (and not empty), or npx nest build for NestJS, npm run build for others
       this.setPhase(app.name, 'building');
       let buildCmd = options.buildCommand?.trim();
