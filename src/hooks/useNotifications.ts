@@ -8,6 +8,7 @@ import {
   notifyAppStopped,
   playNotificationSound,
 } from '@/lib/notifications';
+import { addDeployNotification, addAppStoppedNotification } from '@/lib/notificationStore';
 
 export function useNotifications() {
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
@@ -39,6 +40,10 @@ export function useNotifications() {
     const socket = getSocket();
 
     const handleDeployComplete = (data: { appName: string; success: boolean; error?: string; version?: string }) => {
+      // Store in history
+      addDeployNotification(data.appName, data.success, data.error, data.version);
+      
+      // Show browser notification if enabled
       if (data.success) {
         notifyDeploySuccess(data.appName, data.version);
         playNotificationSound('success');
@@ -49,6 +54,10 @@ export function useNotifications() {
     };
 
     const handleAppStopped = (data: { appName: string; reason?: string }) => {
+      // Store in history
+      addAppStoppedNotification(data.appName, data.reason);
+      
+      // Show browser notification if enabled
       notifyAppStopped(data.appName, data.reason);
       playNotificationSound('warning');
     };
