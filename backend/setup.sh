@@ -342,7 +342,7 @@ EOF
     
     # Criar arquivo de configuração do frontend
     cat > "$DEPLOYHUB_DIR/.env" << EOF
-VITE_API_URL=https://$BACKEND_DOMAIN
+VITE_API_URL=https://$BACKEND_DOMAIN/api
 EOF
     
     print_info "Compilando frontend..."
