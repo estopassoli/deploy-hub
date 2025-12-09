@@ -5,10 +5,8 @@ import {
     WebSocketGateway,
     WebSocketServer,
 } from '@nestjs/websockets';
-import { ChildProcess, spawn } from 'child_process';
+import { IPty, spawn } from 'node-pty';
 import { Server, Socket } from 'socket.io';
-
-const stripAnsiCodes = (value: string) => value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
 
 @WebSocketGateway({
   cors: {
@@ -19,65 +17,68 @@ export class TerminalGateway {
   @WebSocketServer()
   server: Server;
 
-  private activeProcesses: Map<string, ChildProcess> = new Map();
+  private terminals: Map<string, IPty> = new Map();
 
-  @SubscribeMessage('terminal:execute')
-  async handleExecute(
+  @SubscribeMessage('terminal:init')
+  handleInit(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { command?: string },
+    @MessageBody() payload?: { cols?: number; rows?: number },
   ) {
-    try {
-      const command = payload?.command?.trim();
+    this.killProcess(client.id);
 
-      if (!command) {
-        client.emit('terminal:output', { output: 'Comando inválido', isError: true });
-        client.emit('terminal:complete', { exitCode: 1 });
-        return;
-      }
+    const shell = process.env.SHELL || '/bin/bash';
+    const cols = payload?.cols ?? 80;
+    const rows = payload?.rows ?? 24;
 
-      // Kill any existing process for this client
+    const ptyProcess = spawn(shell, ['-i'], {
+      name: 'xterm-color',
+      cols,
+      rows,
+      cwd: process.env.HOME || '/root',
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+
+    this.terminals.set(client.id, ptyProcess);
+
+    ptyProcess.onData((data) => {
+      client.emit('terminal:data', data);
+    });
+
+    ptyProcess.onExit(({ exitCode }) => {
+      client.emit('terminal:exit', { exitCode });
       this.killProcess(client.id);
+    });
+  }
 
-      // Execute command using bash
-      const childProcess = spawn('bash', ['-c', command], {
-        cwd: process.env.HOME || '/root',
-        env: { ...process.env, TERM: 'xterm-256color' },
-      });
+  @SubscribeMessage('terminal:input')
+  handleInput(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { data: string },
+  ) {
+    const terminal = this.terminals.get(client.id);
+    if (!terminal) {
+      client.emit('terminal:error', 'Terminal não inicializado');
+      return;
+    }
 
-      this.activeProcesses.set(client.id, childProcess);
+    if (typeof payload?.data === 'string') {
+      terminal.write(payload.data);
+    }
+  }
 
-      // Handle stdout
-      childProcess.stdout.on('data', (data: Buffer) => {
-        const output = stripAnsiCodes(data.toString());
-        client.emit('terminal:output', { output });
-      });
+  @SubscribeMessage('terminal:resize')
+  handleResize(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { cols: number; rows: number },
+  ) {
+    const terminal = this.terminals.get(client.id);
+    if (!terminal) return;
 
-      // Handle stderr
-      childProcess.stderr.on('data', (data: Buffer) => {
-        const output = stripAnsiCodes(data.toString());
-        client.emit('terminal:output', { output, isError: true });
-      });
+    const cols = Math.max(2, Math.floor(payload?.cols ?? 0));
+    const rows = Math.max(1, Math.floor(payload?.rows ?? 0));
 
-      // Handle process exit
-      childProcess.on('close', (code: number) => {
-        this.activeProcesses.delete(client.id);
-        client.emit('terminal:complete', { exitCode: code || 0 });
-      });
-
-      // Handle process error
-      childProcess.on('error', (error: Error) => {
-        client.emit('terminal:output', { output: `Erro: ${error.message}`, isError: true });
-        client.emit('terminal:complete', { exitCode: 1 });
-        this.activeProcesses.delete(client.id);
-      });
-
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      client.emit('terminal:output', {
-        output: `Erro ao executar comando: ${message}`,
-        isError: true,
-      });
-      client.emit('terminal:complete', { exitCode: 1 });
+    if (cols && rows) {
+      terminal.resize(cols, rows);
     }
   }
 
@@ -86,16 +87,19 @@ export class TerminalGateway {
     this.killProcess(client.id);
   }
 
-  private killProcess(clientId: string) {
-    const proc = this.activeProcesses.get(clientId);
-    if (proc) {
-      proc.kill('SIGTERM');
-      this.activeProcesses.delete(clientId);
-    }
-  }
-
-  // Cleanup on client disconnect
   handleDisconnect(client: Socket) {
     this.killProcess(client.id);
+  }
+
+  private killProcess(clientId: string) {
+    const terminal = this.terminals.get(clientId);
+    if (terminal) {
+      try {
+        terminal.kill();
+      } catch (error) {
+        console.error('Erro ao finalizar terminal:', error);
+      }
+      this.terminals.delete(clientId);
+    }
   }
 }

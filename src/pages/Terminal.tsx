@@ -1,269 +1,172 @@
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { getSocket } from '@/lib/websocket';
-import { AlertCircle, Check, Copy, Maximize2, Terminal as TerminalIcon, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getConnectedSocket } from '@/lib/websocket';
+import { AlertCircle, Check, Copy, Maximize2, RefreshCw, Terminal as TerminalIcon, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
-
-interface TerminalLine {
-  id: number;
-  type: 'input' | 'output' | 'error' | 'system';
-  content: string;
-  timestamp: Date;
-}
-
-// Terminal content component
-function TerminalContent({
-  lines,
-  command,
-  setCommand,
-  isExecuting,
-  onExecute,
-  onKeyDown,
-  terminalRef,
-  inputRef,
-  isFloating = false,
-}: {
-  lines: TerminalLine[];
-  command: string;
-  setCommand: (cmd: string) => void;
-  isExecuting: boolean;
-  onExecute: () => void;
-  onKeyDown: (e: React.KeyboardEvent) => void;
-  terminalRef: React.RefObject<HTMLDivElement>;
-  inputRef: React.RefObject<HTMLInputElement>;
-  isFloating?: boolean;
-}) {
-  const handleClick = () => inputRef.current?.focus();
-
-  return (
-    <div
-      ref={terminalRef}
-      onClick={handleClick}
-      className={cn(
-        "overflow-auto bg-[#1a1b26] p-4 font-mono text-sm cursor-text",
-        isFloating ? "h-full" : "flex-1 min-h-[500px] rounded-lg border border-[#414868]"
-      )}
-      style={{ fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace" }}
-    >
-      {/* ASCII Art Header */}
-      {lines.length <= 2 && (
-        <pre className="text-[#7aa2f7] text-xs mb-4 leading-tight">
-{`╔══════════════════════════════════════════════════════════════╗
-║  ____             _             _   _       _                ║
-║ |  _ \\  ___ _ __ | | ___  _   _| | | |_   _| |__             ║
-║ | | | |/ _ \\ '_ \\| |/ _ \\| | | | |_| | | | | '_ \\            ║
-║ | |_| |  __/ |_) | | (_) | |_| |  _  | |_| | |_) |           ║
-║ |____/ \\___| .__/|_|\\___/ \\__, |_| |_|\\__,_|_.__/            ║
-║            |_|            |___/                              ║
-╚══════════════════════════════════════════════════════════════╝`}
-        </pre>
-      )}
-
-      {lines.map((line) => (
-        <div
-          key={line.id}
-          className={cn(
-            'py-0.5 whitespace-pre-wrap break-all leading-relaxed',
-            line.type === 'input' && 'text-[#7dcfff]',
-            line.type === 'output' && 'text-[#a9b1d6]',
-            line.type === 'error' && 'text-[#f7768e]',
-            line.type === 'system' && 'text-[#9ece6a] italic'
-          )}
-        >
-          {line.content}
-        </div>
-      ))}
-
-      {/* Input Line */}
-      <div className="flex items-center gap-2 mt-2">
-        <span className="text-[#bb9af7] font-bold select-none">root@deployhub</span>
-        <span className="text-[#a9b1d6]">:</span>
-        <span className="text-[#7aa2f7] font-bold">~</span>
-        <span className="text-[#a9b1d6]">$</span>
-        <input
-          ref={inputRef}
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          onKeyDown={onKeyDown}
-          disabled={isExecuting}
-          placeholder={isExecuting ? '' : ''}
-          autoFocus
-          className="flex-1 bg-transparent border-none text-[#c0caf5] placeholder:text-[#565f89] focus:outline-none p-0 h-auto font-mono caret-[#7aa2f7]"
-          style={{ fontFamily: 'inherit' }}
-        />
-        {isExecuting && (
-          <span className="text-[#7aa2f7] animate-pulse">█</span>
-        )}
-        {!isExecuting && (
-          <span className="text-[#7aa2f7] animate-[blink_1s_infinite]">█</span>
-        )}
-      </div>
-    </div>
-  );
-}
+import { Terminal as XTerm } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css';
+import type { Socket } from 'socket.io-client';
 
 export default function Terminal() {
-  const [lines, setLines] = useState<TerminalLine[]>([
-    { id: 0, type: 'system', content: '● Terminal conectado ao servidor DeployHub', timestamp: new Date() },
-    { id: 1, type: 'system', content: '● Digite um comando e pressione Enter para executar', timestamp: new Date() },
-  ]);
-  const [command, setCommand] = useState('');
-  const [isExecuting, setIsExecuting] = useState(false);
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [copied, setCopied] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [hasDetachedWindow, setHasDetachedWindow] = useState(false);
   const location = useLocation();
   const isStandalone = useMemo(() => new URLSearchParams(location.search).get('detached') === '1', [location.search]);
 
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const lineIdRef = useRef(2);
+  const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
-  // Auto-scroll to bottom
   useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    if ((hasDetachedWindow && !isStandalone) || !terminalContainerRef.current) {
+      return;
     }
-  }, [lines]);
 
-  // WebSocket connection for terminal
-  useEffect(() => {
-    const socket = getSocket();
+    let mounted = true;
+    let cleanup: (() => void) | null = null;
 
-    const handleConnect = () => {
-      setIsConnected(true);
-      addLine('system', '✓ Conexão WebSocket estabelecida');
-    };
+    const init = async () => {
+      const container = terminalContainerRef.current;
+      if (!container) return;
 
-    const handleDisconnect = () => {
-      setIsConnected(false);
-      addLine('error', '✗ Conexão WebSocket perdida');
-    };
+      const socket = await getConnectedSocket();
+      if (!mounted) return;
 
-    const handleTerminalOutput = (data: { output: string; isError?: boolean }) => {
-      if (data.output) {
-        const outputLines = data.output.split('\n');
-        outputLines.forEach((line) => {
-          if (line.trim()) {
-            addLine(data.isError ? 'error' : 'output', line);
-          }
+      const terminal = new XTerm({
+        allowTransparency: true,
+        cursorBlink: true,
+        fontFamily: 'JetBrains Mono, Fira Code, SFMono-Regular, Consolas, monospace',
+        fontSize: 14,
+        theme: {
+          background: '#1a1b26',
+          foreground: '#c0caf5',
+          cursor: '#7aa2f7',
+          cursorAccent: '#1a1b26',
+          black: '#1a1b26',
+          brightBlack: '#414868',
+        },
+      });
+      const fitAddon = new FitAddon();
+      terminal.loadAddon(fitAddon);
+      terminal.open(container);
+      fitAddon.fit();
+      terminal.focus();
+
+      terminalRef.current = terminal;
+      fitAddonRef.current = fitAddon;
+      socketRef.current = socket;
+
+      const updateSize = () => {
+        if (!socketRef.current || !terminalRef.current || !fitAddonRef.current) return;
+        fitAddonRef.current.fit();
+        socketRef.current.emit('terminal:resize', {
+          cols: terminalRef.current.cols,
+          rows: terminalRef.current.rows,
         });
+      };
+
+      const resizeObserver = new ResizeObserver(updateSize);
+      resizeObserver.observe(container);
+      window.addEventListener('resize', updateSize);
+
+      const handleData = (chunk: string) => terminal.write(chunk);
+      const handleExit = ({ exitCode }: { exitCode: number }) => terminal.writeln(`\r\nProcesso finalizado (code: ${exitCode})\r\n`);
+      const handleError = (message: string) => terminal.writeln(`\r\n[erro] ${message}\r\n`);
+      const handleConnect = () => setIsConnected(true);
+      const handleDisconnect = () => setIsConnected(false);
+
+      socket.on('terminal:data', handleData);
+      socket.on('terminal:exit', handleExit);
+      socket.on('terminal:error', handleError);
+      socket.on('connect', handleConnect);
+      socket.on('disconnect', handleDisconnect);
+
+      if (socket.connected) {
+        handleConnect();
       }
+
+      terminal.onData((data) => socket.emit('terminal:input', { data }));
+
+      socket.emit('terminal:init', { cols: terminal.cols, rows: terminal.rows });
+
+      cleanup = () => {
+        resizeObserver.disconnect();
+        window.removeEventListener('resize', updateSize);
+        terminal.dispose();
+        socket.off('terminal:data', handleData);
+        socket.off('terminal:exit', handleExit);
+        socket.off('terminal:error', handleError);
+        socket.off('connect', handleConnect);
+        socket.off('disconnect', handleDisconnect);
+        socket.emit('terminal:kill');
+        if (terminalRef.current === terminal) {
+          terminalRef.current = null;
+        }
+        if (fitAddonRef.current === fitAddon) {
+          fitAddonRef.current = null;
+        }
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
+      };
     };
 
-    const handleTerminalComplete = (data: { exitCode: number }) => {
-      setIsExecuting(false);
-      if (data.exitCode !== 0) {
-        addLine('error', `Process exited with code: ${data.exitCode}`);
-      }
-    };
-
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('terminal:output', handleTerminalOutput);
-    socket.on('terminal:complete', handleTerminalComplete);
-
-    if (socket.connected) {
-      setIsConnected(true);
-    }
+    init();
 
     return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('terminal:output', handleTerminalOutput);
-      socket.off('terminal:complete', handleTerminalComplete);
+      mounted = false;
+      cleanup?.();
     };
-  }, []);
-
-  const addLine = useCallback((type: TerminalLine['type'], content: string) => {
-    setLines((prev) => [
-      ...prev,
-      {
-        id: lineIdRef.current++,
-        type,
-        content,
-        timestamp: new Date(),
-      },
-    ]);
-  }, []);
-
-  const executeCommand = async () => {
-    if (!command.trim() || isExecuting) return;
-
-    const trimmedCommand = command.trim();
-
-    // Add to history
-    setHistory((prev) => [trimmedCommand, ...prev.slice(0, 49)]);
-    setHistoryIndex(-1);
-
-    // Show input line with full prompt
-    addLine('input', `root@deployhub:~$ ${trimmedCommand}`);
-    setCommand('');
-    setIsExecuting(true);
-
-    // Send command via WebSocket
-    const socket = getSocket();
-    socket.emit('terminal:execute', { command: trimmedCommand });
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      executeCommand();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (history.length > 0) {
-        const newIndex = Math.min(historyIndex + 1, history.length - 1);
-        setHistoryIndex(newIndex);
-        setCommand(history[newIndex]);
-      }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (historyIndex > 0) {
-        const newIndex = historyIndex - 1;
-        setHistoryIndex(newIndex);
-        setCommand(history[newIndex]);
-      } else {
-        setHistoryIndex(-1);
-        setCommand('');
-      }
-    } else if (e.key === 'c' && e.ctrlKey) {
-      if (isExecuting) {
-        const socket = getSocket();
-        socket.emit('terminal:kill');
-        addLine('error', '^C');
-        setIsExecuting(false);
-      }
-    } else if (e.key === 'l' && e.ctrlKey) {
-      e.preventDefault();
-      clearTerminal();
-    }
-  };
-
-  const clearTerminal = () => {
-    setLines([{ id: lineIdRef.current++, type: 'system', content: '● Terminal limpo', timestamp: new Date() }]);
-  };
+  }, [hasDetachedWindow, isStandalone]);
 
   const copyOutput = () => {
-    const text = lines
-      .filter((l) => l.type === 'output' || l.type === 'input')
-      .map((l) => l.content)
-      .join('\n');
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+
+    let text = terminal.getSelection();
+    if (!text) {
+      const buffer: string[] = [];
+      const length = terminal.buffer.active.length;
+      for (let i = 0; i < length; i++) {
+        buffer.push(terminal.buffer.active.getLine(i)?.translateToString(true) ?? '');
+      }
+      text = buffer.join('\n').trim();
+    }
+
+    if (!text) {
+      toast.error('Nada para copiar');
+      return;
+    }
 
     navigator.clipboard.writeText(text);
     setCopied(true);
-    toast.success('Output copiado!');
+    toast.success('Conteúdo copiado!');
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const clearTerminal = () => {
+    terminalRef.current?.clear();
+  };
+
+  const restartTerminal = () => {
+    const socket = socketRef.current;
+    const terminal = terminalRef.current;
+    if (!socket || !terminal) return;
+    terminal.reset();
+    socket.emit('terminal:kill');
+    socket.emit('terminal:init', { cols: terminal.cols, rows: terminal.rows });
+    terminal.focus();
   };
 
   const openStandaloneWindow = () => {
     if (typeof window === 'undefined') return;
-    const targetUrl = `${window.location.origin}/terminal?detached=1`;
-    const popup = window.open(targetUrl, '_blank', 'noopener,noreferrer,width=1200,height=700');
+    const popup = window.open(`${window.location.origin}/terminal?detached=1`, '_blank', 'noopener,noreferrer,width=1200,height=700');
     if (!popup) {
       toast.error('Permita pop-ups no navegador para desanexar o terminal.');
       return;
@@ -273,9 +176,8 @@ export default function Terminal() {
     toast.info('Terminal aberto em nova janela');
   };
 
-  const terminalLayout = (
+  const renderTerminalShell = () => (
     <div className="flex h-full flex-col gap-4 p-4 md:p-6">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#7aa2f7]/10">
@@ -283,7 +185,7 @@ export default function Terminal() {
           </div>
           <div>
             <h1 className="text-xl md:text-2xl font-bold text-foreground">Terminal</h1>
-            <p className="text-xs md:text-sm text-muted-foreground">Execute comandos diretamente no servidor</p>
+            <p className="text-xs md:text-sm text-muted-foreground">Shell interativo conectado ao servidor</p>
           </div>
         </div>
 
@@ -311,60 +213,43 @@ export default function Terminal() {
             <Trash2 className="h-4 w-4" />
             <span className="hidden md:inline ml-2">Limpar</span>
           </Button>
+          <Button variant="outline" size="sm" onClick={restartTerminal}>
+            <RefreshCw className="h-4 w-4" />
+            <span className="hidden md:inline ml-2">Reiniciar</span>
+          </Button>
         </div>
       </div>
 
-      {/* Warning */}
       <div className="flex items-center gap-2 p-3 rounded-lg bg-[#e0af68]/10 border border-[#e0af68]/20 text-[#e0af68] text-sm">
         <AlertCircle className="h-4 w-4 flex-shrink-0" />
         <span>Cuidado! Você está executando comandos diretamente no servidor. Use com responsabilidade.</span>
       </div>
 
-      {/* Terminal */}
-      <TerminalContent
-        lines={lines}
-        command={command}
-        setCommand={setCommand}
-        isExecuting={isExecuting}
-        onExecute={executeCommand}
-        onKeyDown={handleKeyDown}
-        terminalRef={terminalRef}
-        inputRef={inputRef}
-      />
+      <div className="flex-1 min-h-[500px] overflow-hidden rounded-lg border border-[#414868] bg-[#1a1b26]">
+        <div ref={terminalContainerRef} className="h-full w-full" />
+      </div>
 
-      {/* Shortcuts */}
       <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
         <span>
-          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">Enter</kbd> Executar
+          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">Ctrl+C</kbd> Interrompe comando
         </span>
         <span>
-          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">↑</kbd>{' '}
-          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">↓</kbd> Histórico
+          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">Ctrl+L</kbd> Limpa tela
         </span>
         <span>
-          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">Ctrl+C</kbd> Cancelar
+          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">Tab</kbd> Autocompleta caminho/comando
         </span>
         <span>
-          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">Ctrl+L</kbd> Limpar
+          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">↑↓</kbd> Histórico de comandos
         </span>
       </div>
     </div>
   );
 
-  const cursorStyles = (
-    <style>{`
-      @keyframes blink {
-        0%, 50% { opacity: 1; }
-        51%, 100% { opacity: 0; }
-      }
-    `}</style>
-  );
-
   if (isStandalone) {
     return (
       <div className="min-h-screen bg-background text-foreground">
-        {terminalLayout}
-        {cursorStyles}
+        {renderTerminalShell()}
       </div>
     );
   }
@@ -390,9 +275,8 @@ export default function Terminal() {
           </div>
         </div>
       ) : (
-        terminalLayout
+        renderTerminalShell()
       )}
-      {cursorStyles}
     </Layout>
   );
 }
