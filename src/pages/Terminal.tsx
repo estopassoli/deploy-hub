@@ -166,81 +166,95 @@ export default function Terminal() {
 
   const openStandaloneWindow = () => {
     if (typeof window === 'undefined') return;
-    const popup = window.open(`${window.location.origin}/terminal?detached=1`, '_blank', 'noopener,noreferrer,width=1200,height=700');
+    const url = new URL(window.location.href);
+    url.searchParams.set('detached', '1');
+    url.searchParams.set('v', Date.now().toString());
+    const width = window.screen.availWidth;
+    const height = window.screen.availHeight;
+    const popup = window.open(url.toString(), 'deployhub-terminal', `width=${width},height=${height},left=0,top=0`);
     if (!popup) {
       toast.error('Permita pop-ups no navegador para desanexar o terminal.');
       return;
     }
+    popup.opener = null;
     popup.focus();
     setHasDetachedWindow(true);
     toast.info('Terminal aberto em nova janela');
   };
 
-  const renderTerminalShell = () => (
-    <div className="flex h-full flex-col gap-4 p-4 md:p-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+  const TerminalShell = ({ standalone = false }: { standalone?: boolean }) => (
+    <div
+      className={cn(
+        'relative flex h-full flex-col gap-6 overflow-hidden rounded-3xl border border-white/5 bg-[#050718]/80 p-4 shadow-[0_40px_120px_rgba(3,7,18,0.65)] backdrop-blur',
+        standalone && 'min-h-[calc(100vh-3rem)] border-white/10 p-6 md:p-10'
+      )}
+    >
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,_rgba(122,162,247,0.25),_transparent_55%)]" />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#7aa2f7]/10">
-            <TerminalIcon className="h-5 w-5 text-[#7aa2f7]" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#1a1f3d] text-[#7aa2f7]">
+            <TerminalIcon className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-xl md:text-2xl font-bold text-foreground">Terminal</h1>
-            <p className="text-xs md:text-sm text-muted-foreground">Shell interativo conectado ao servidor</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-[#818cf8]">Shell remoto</p>
+            <h1 className="text-2xl font-semibold text-white">DeployHub Terminal</h1>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div
             className={cn(
-              'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium',
-              isConnected ? 'bg-[#9ece6a]/10 text-[#9ece6a]' : 'bg-[#f7768e]/10 text-[#f7768e]'
+              'flex items-center gap-2 rounded-full px-4 py-1 text-xs font-semibold',
+              isConnected ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'
             )}
           >
-            <div className={cn('h-2 w-2 rounded-full', isConnected ? 'bg-[#9ece6a] animate-pulse' : 'bg-[#f7768e]')} />
-            {isConnected ? 'Conectado' : 'Desconectado'}
+            <span className={cn('h-2 w-2 rounded-full', isConnected ? 'bg-emerald-300 animate-pulse' : 'bg-rose-300')} />
+            {isConnected ? 'Conectado' : 'Reconectando'}
           </div>
           {!isStandalone && (
-            <Button variant="outline" size="sm" onClick={openStandaloneWindow}>
+            <Button variant="outline" size="sm" onClick={openStandaloneWindow} className="border-white/10 bg-white/5 text-white">
               <Maximize2 className="h-4 w-4" />
-              <span className="hidden md:inline ml-2">Desanexar</span>
+              <span className="ml-2 hidden md:inline">Tela cheia</span>
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={copyOutput}>
+          <Button variant="outline" size="sm" onClick={copyOutput} className="border-white/10 bg-white/5 text-white">
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-            <span className="hidden md:inline ml-2">Copiar</span>
+            <span className="ml-2 hidden md:inline">Copiar</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={clearTerminal}>
+          <Button variant="outline" size="sm" onClick={clearTerminal} className="border-white/10 bg-white/5 text-white">
             <Trash2 className="h-4 w-4" />
-            <span className="hidden md:inline ml-2">Limpar</span>
+            <span className="ml-2 hidden md:inline">Limpar</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={restartTerminal}>
+          <Button variant="outline" size="sm" onClick={restartTerminal} className="border-white/10 bg-white/5 text-white">
             <RefreshCw className="h-4 w-4" />
-            <span className="hidden md:inline ml-2">Reiniciar</span>
+            <span className="ml-2 hidden md:inline">Reiniciar</span>
           </Button>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 p-3 rounded-lg bg-[#e0af68]/10 border border-[#e0af68]/20 text-[#e0af68] text-sm">
-        <AlertCircle className="h-4 w-4 flex-shrink-0" />
-        <span>Cuidado! Você está executando comandos diretamente no servidor. Use com responsabilidade.</span>
+      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-5 py-3 text-sm text-amber-200">
+        <div className="flex items-center gap-2">
+          <AlertCircle className="h-4 w-4" />
+          <span>Cuidado! Comandos executam direto no servidor de produção.</span>
+        </div>
       </div>
 
-      <div className="flex-1 min-h-[500px] overflow-hidden rounded-lg border border-[#414868] bg-[#1a1b26]">
+      <div className="flex-1 min-h-[520px] overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-b from-[#0b1026] to-[#050716]">
         <div ref={terminalContainerRef} className="h-full w-full" />
       </div>
 
-      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+      <div className="flex flex-wrap gap-4 text-xs text-[#94a3b8]">
         <span>
-          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">Ctrl+C</kbd> Interrompe comando
+          <kbd className="rounded bg-white/5 px-2 py-1 text-[#7aa2f7]">Ctrl+C</kbd> interrompe comando
         </span>
         <span>
-          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">Ctrl+L</kbd> Limpa tela
+          <kbd className="rounded bg-white/5 px-2 py-1 text-[#7aa2f7]">Ctrl+L</kbd> limpa tela
         </span>
         <span>
-          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">Tab</kbd> Autocompleta caminho/comando
+          <kbd className="rounded bg-white/5 px-2 py-1 text-[#7aa2f7]">Tab</kbd> autocompleta
         </span>
         <span>
-          <kbd className="px-1.5 py-0.5 rounded bg-[#24283b] text-[#7aa2f7] border border-[#414868]">↑↓</kbd> Histórico de comandos
+          <kbd className="rounded bg-white/5 px-2 py-1 text-[#7aa2f7]">↑↓</kbd> histórico
         </span>
       </div>
     </div>
@@ -248,8 +262,8 @@ export default function Terminal() {
 
   if (isStandalone) {
     return (
-      <div className="min-h-screen bg-background text-foreground">
-        {renderTerminalShell()}
+      <div className="min-h-screen bg-[#01030c] px-3 py-6 text-white md:px-8">
+        <TerminalShell standalone />
       </div>
     );
   }
@@ -257,25 +271,30 @@ export default function Terminal() {
   return (
     <Layout>
       {hasDetachedWindow ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-3xl border border-white/5 bg-[#050718] p-8 text-center text-white">
           <TerminalIcon className="h-12 w-12 text-[#7aa2f7]" />
           <div>
-            <h2 className="text-2xl font-semibold text-foreground">Terminal aberto em nova janela</h2>
-            <p className="mt-2 text-muted-foreground max-w-md">
-              Mantemos o terminal destacado para você trabalhar em tela cheia. Caso precise reabrir ou voltar ao modo incorporado, use as opções abaixo.
+            <h2 className="text-2xl font-semibold">Terminal aberto em tela cheia</h2>
+            <p className="mt-2 text-sm text-white/70">
+              Mantemos o terminal destacado para modo imersivo. Reabra a janela dedicada ou retorne para a versão incorporada quando quiser.
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button onClick={openStandaloneWindow}>
-              Reabrir janela do terminal
+              Reabrir nova janela
             </Button>
             <Button variant="outline" onClick={() => setHasDetachedWindow(false)}>
-              Usar terminal incorporado
+              Voltar ao painel
             </Button>
           </div>
         </div>
       ) : (
-        renderTerminalShell()
+        <div className="relative min-h-[calc(100vh-7rem)] bg-gradient-to-b from-[#01030c] via-[#050718] to-[#01030c] px-2 py-6 text-white md:px-6">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(129,140,248,0.12),transparent_55%)]" />
+          <div className="relative">
+            <TerminalShell />
+          </div>
+        </div>
       )}
     </Layout>
   );
