@@ -225,7 +225,7 @@ export default function Terminal() {
         <span>Cuidado! Você está executando comandos diretamente no servidor. Use com responsabilidade.</span>
       </div>
 
-      <div className="flex-1 min-h-[500px] overflow-hidden rounded-lg border border-[#414868] bg-[#1a1b26]">
+      <div className="flex-1 min-h-[500px] overflow-hidden rounded-lg border border-[#414868] bg-[#1a1b26] p-3">
         <div ref={terminalContainerRef} className="h-full w-full" />
       </div>
 
@@ -248,7 +248,7 @@ export default function Terminal() {
 
   if (isStandalone) {
     return (
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen bg-background text-foreground p-3">
         {renderTerminalShell()}
       </div>
     );
