@@ -5,7 +5,7 @@ import { getConnectedSocket } from '@/lib/websocket';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { AlertCircle, Check, Copy, Maximize2, RefreshCw, Terminal as TerminalIcon, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, Copy, RefreshCw, Terminal as TerminalIcon, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { Socket } from 'socket.io-client';
@@ -199,12 +199,12 @@ export default function Terminal() {
             <div className={cn('h-2 w-2 rounded-full', isConnected ? 'bg-[#9ece6a] animate-pulse' : 'bg-[#f7768e]')} />
             {isConnected ? 'Conectado' : 'Desconectado'}
           </div>
-          {!isStandalone && (
+        {/*   {!isStandalone && (
             <Button variant="outline" size="sm" onClick={openStandaloneWindow}>
               <Maximize2 className="h-4 w-4" />
               <span className="hidden md:inline ml-2">Desanexar</span>
             </Button>
-          )}
+          )} */}
           <Button variant="outline" size="sm" onClick={copyOutput}>
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             <span className="hidden md:inline ml-2">Copiar</span>
