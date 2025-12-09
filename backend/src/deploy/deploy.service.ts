@@ -1,13 +1,13 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { exec, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
 import { AppsService } from '../apps/apps.service';
+import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployGateway } from './deploy.gateway';
-import { EmailService } from '../email/email.service';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -581,8 +581,8 @@ export class DeployService {
 
     // Tenta npm ci primeiro (mais rápido e confiável)
     try {
-      this.log(appName, '  Command: npm ci --prefer-offline', deployId);
-      await this.runCommand('npm ci --prefer-offline', cwd, appName, deployId, envVars);
+      this.log(appName, '  Command: npm ci --production=false', deployId);
+      await this.runCommand('npm ci --production=false', cwd, appName, deployId, envVars);
     } catch (error) {
       const errorMsg = error.message || '';
 
