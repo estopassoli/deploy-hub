@@ -63,7 +63,7 @@
     "vaul": "^0.9.9",
     "vite-plugin-pwa": "^1.2.0",
     "xterm": "^5.3.0",
-    "xterm-addon-fit": "^0.10.0",
+    "xterm-addon-fit": "^0.8.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
