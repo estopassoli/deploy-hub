@@ -2,14 +2,14 @@ import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getConnectedSocket } from '@/lib/websocket';
+import { FitAddon } from '@xterm/addon-fit';
+import { Terminal as XTerm } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { AlertCircle, Check, Copy, Maximize2, RefreshCw, Terminal as TerminalIcon, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { toast } from 'sonner';
-import { Terminal as XTerm } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import 'xterm/css/xterm.css';
 import type { Socket } from 'socket.io-client';
+import { toast } from 'sonner';
 
 export default function Terminal() {
   const [isConnected, setIsConnected] = useState(false);
