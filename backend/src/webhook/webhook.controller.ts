@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, RawBodyRequest, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Param, Post, RawBodyRequest, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { WebhookService } from './webhook.service';
@@ -25,7 +25,7 @@ export class WebhookController {
     const sshHost = process.env.SSH_HOST;
     const sshUser = process.env.SSH_USER || 'root';
     if (!sshHost) {
-      return;
+      throw new BadRequestException('SSH_HOST não está configurada no servidor DeployHub');
     }
     return this.webhookService.generateGitHubActionsWorkflow(appId, sshHost, sshUser);
   }

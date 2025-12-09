@@ -1,11 +1,13 @@
 import {
-  WebSocketGateway,
-  SubscribeMessage,
-  WebSocketServer,
-  ConnectedSocket,
+    ConnectedSocket,
+    SubscribeMessage,
+    WebSocketGateway,
+    WebSocketServer,
 } from '@nestjs/websockets';
+import { ChildProcess, spawn } from 'child_process';
 import { Server, Socket } from 'socket.io';
-import { spawn, ChildProcess } from 'child_process';
+
+const stripAnsiCodes = (value: string) => value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
 
 @WebSocketGateway({
   cors: {
@@ -45,12 +47,14 @@ export class TerminalGateway {
 
       // Handle stdout
       childProcess.stdout.on('data', (data: Buffer) => {
-        client.emit('terminal:output', { output: data.toString() });
+        const output = stripAnsiCodes(data.toString());
+        client.emit('terminal:output', { output });
       });
 
       // Handle stderr
       childProcess.stderr.on('data', (data: Buffer) => {
-        client.emit('terminal:output', { output: data.toString(), isError: true });
+        const output = stripAnsiCodes(data.toString());
+        client.emit('terminal:output', { output, isError: true });
       });
 
       // Handle process exit

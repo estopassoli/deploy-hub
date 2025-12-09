@@ -1,6 +1,28 @@
 import { io, Socket } from 'socket.io-client';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'https://api-panel.auraai.chat';
+const resolveWsUrl = () => {
+  const explicit = import.meta.env.VITE_WS_URL?.trim();
+  if (explicit) return explicit;
+
+  const apiUrl = import.meta.env.VITE_API_URL?.trim();
+  if (apiUrl) {
+    try {
+      const parsed = new URL(apiUrl);
+      return `${parsed.protocol}//${parsed.host}`;
+    } catch (error) {
+      console.warn('Invalid VITE_API_URL, falling back to window location:', error);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.host}`;
+  }
+
+  // Development fallback
+  return 'http://localhost:10001';
+};
+
+const WS_URL = resolveWsUrl();
 
 class WebSocketClient {
   private socket: Socket | null = null;

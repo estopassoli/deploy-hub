@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,20 +9,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { 
-  Github,
-  Copy,
-  Check,
-  RefreshCw,
-  Shield,
-  Webhook,
-  FileCode,
-  ExternalLink,
-  Loader2
-} from 'lucide-react';
-import { toast } from 'sonner';
 import api from '@/lib/api';
 import { App } from '@/types/app';
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  FileCode,
+  Github,
+  Loader2,
+  RefreshCw,
+  Shield,
+  Webhook
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
+
+const resolveApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL?.trim();
+  if (envUrl) {
+    try {
+      const parsed = new URL(envUrl);
+      return `${parsed.protocol}//${parsed.host}`;
+    } catch (error) {
+      console.warn('VITE_API_URL inválida, usando fallback:', error);
+      return envUrl.replace(/\/api\/?$/, '');
+    }
+  }
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return 'http://localhost:10001';
+};
 
 export default function GitHub() {
   const [apps, setApps] = useState<App[]>([]);
@@ -32,8 +49,12 @@ export default function GitHub() {
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [workflowYaml, setWorkflowYaml] = useState('');
-  
+
   const selectedApp = apps.find(app => app.id === selectedAppId);
+  const apiBaseUrl = useMemo(() => resolveApiBaseUrl().replace(/\/$/, ''), []);
+  const webhookEndpoint = useMemo(() => (
+    selectedApp ? `${apiBaseUrl}/api/webhook/github/${selectedApp.name}` : ''
+  ), [apiBaseUrl, selectedApp]);
 
   useEffect(() => {
     loadApps();
@@ -164,8 +185,9 @@ export default function GitHub() {
                   readOnly
                   className="font-mono text-sm"
                 />
-                <Button 
-                  variant="outline" 
+                <Button
+                  size='icon'
+                  variant="outline"
                   onClick={() => copyToClipboard(selectedApp.webhookSecret || '', 'secret')}
                 >
                   {copiedSecret ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
@@ -187,13 +209,14 @@ export default function GitHub() {
               </p>
               <div className="flex gap-2">
                 <Input
-                  value={`https://api-panel.auraai.chat/api/webhook/github/${selectedApp.name}`}
+                  value={webhookEndpoint}
                   readOnly
                   className="font-mono text-sm"
                 />
-                <Button 
-                  variant="outline" 
-                  onClick={() => copyToClipboard(`https://api-panel.auraai.chat/api/webhook/github/${selectedApp.name}`, 'yaml')}
+                <Button
+                  size='icon'
+                  variant="outline"
+                  onClick={() => copyToClipboard(webhookEndpoint, 'yaml')}
                 >
                   <Copy className="h-4 w-4" />
                 </Button>
@@ -207,9 +230,9 @@ export default function GitHub() {
                   <FileCode className="h-5 w-5 text-primary" />
                   <h3 className="font-semibold text-foreground">GitHub Actions Workflow</h3>
                 </div>
-                <Button 
-                  variant="outline" 
-                  size="sm"
+                <Button
+                  variant="outline"
+                  size='icon'
                   onClick={() => copyToClipboard(workflowYaml, 'yaml')}
                 >
                   {copiedYaml ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
@@ -267,7 +290,7 @@ export default function GitHub() {
             {/* External Link */}
             <div className="flex justify-center">
               <Button variant="outline" asChild>
-                <a 
+                <a
                   href={selectedApp.repository?.replace('git@github.com:', 'https://github.com/').replace('.git', '/settings/secrets/actions') || '#'}
                   target="_blank"
                   rel="noopener noreferrer"

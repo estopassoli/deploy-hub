@@ -335,6 +335,13 @@ REGISTRATION_SECRET=$REGISTRATION_SECRET
 # Webhook Secret (para validação HMAC do GitHub)
 WEBHOOK_SECRET=$WEBHOOK_SECRET
 
+# Public API base (utilizada por Integrações externas)
+API_URL=https://$BACKEND_DOMAIN
+
+# Host/usuário utilizados para gerar workflows GitHub
+SSH_HOST=$BACKEND_DOMAIN
+SSH_USER=$INSTALL_USER
+
 # Email (Resend) - Opcional
 # RESEND_API_KEY=sua-chave-resend-aqui
 EOF

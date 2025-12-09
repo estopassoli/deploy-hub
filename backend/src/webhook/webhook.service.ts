@@ -81,7 +81,7 @@ export class WebhookService {
     const app = await this.prisma.app.findUnique({ where: { id: appId } });
     if (!app) throw new BadRequestException('App não encontrado');
 
-    const apiUrl = process.env.API_URL || 'https://api-panel.auraai.chat';
+    const apiUrl = (process.env.API_URL || 'http://localhost:10001').replace(/\/$/, '');
 
     // Build the JSON payload as a proper string for accurate HMAC
     const workflow = `name: Deploy ${app.name}
