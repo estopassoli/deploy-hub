@@ -116,6 +116,7 @@ export default function Terminal() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [copied, setCopied] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [hasDetachedWindow, setHasDetachedWindow] = useState(false);
   const location = useLocation();
   const isStandalone = useMemo(() => new URLSearchParams(location.search).get('detached') === '1', [location.search]);
 
@@ -261,9 +262,14 @@ export default function Terminal() {
 
   const openStandaloneWindow = () => {
     if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    url.searchParams.set('detached', '1');
-    window.open(url.toString(), '_blank', 'noopener,noreferrer,width=1200,height=700');
+    const targetUrl = `${window.location.origin}/terminal?detached=1`;
+    const popup = window.open(targetUrl, '_blank', 'noopener,noreferrer,width=1200,height=700');
+    if (!popup) {
+      toast.error('Permita pop-ups no navegador para desanexar o terminal.');
+      return;
+    }
+    popup.focus();
+    setHasDetachedWindow(true);
     toast.info('Terminal aberto em nova janela');
   };
 
@@ -365,7 +371,27 @@ export default function Terminal() {
 
   return (
     <Layout>
-      {terminalLayout}
+      {hasDetachedWindow ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+          <TerminalIcon className="h-12 w-12 text-[#7aa2f7]" />
+          <div>
+            <h2 className="text-2xl font-semibold text-foreground">Terminal aberto em nova janela</h2>
+            <p className="mt-2 text-muted-foreground max-w-md">
+              Mantemos o terminal destacado para você trabalhar em tela cheia. Caso precise reabrir ou voltar ao modo incorporado, use as opções abaixo.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button onClick={openStandaloneWindow}>
+              Reabrir janela do terminal
+            </Button>
+            <Button variant="outline" onClick={() => setHasDetachedWindow(false)}>
+              Usar terminal incorporado
+            </Button>
+          </div>
+        </div>
+      ) : (
+        terminalLayout
+      )}
       {cursorStyles}
     </Layout>
   );

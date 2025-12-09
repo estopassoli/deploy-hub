@@ -1,5 +1,6 @@
 import {
     ConnectedSocket,
+    MessageBody,
     SubscribeMessage,
     WebSocketGateway,
     WebSocketServer,
@@ -23,20 +24,20 @@ export class TerminalGateway {
   @SubscribeMessage('terminal:execute')
   async handleExecute(
     @ConnectedSocket() client: Socket,
-    payload: { command: string },
+    @MessageBody() payload: { command?: string },
   ) {
-    const { command } = payload;
-
-    if (!command || typeof command !== 'string') {
-      client.emit('terminal:output', { output: 'Comando inválido', isError: true });
-      client.emit('terminal:complete', { exitCode: 1 });
-      return;
-    }
-
-    // Kill any existing process for this client
-    this.killProcess(client.id);
-
     try {
+      const command = payload?.command?.trim();
+
+      if (!command) {
+        client.emit('terminal:output', { output: 'Comando inválido', isError: true });
+        client.emit('terminal:complete', { exitCode: 1 });
+        return;
+      }
+
+      // Kill any existing process for this client
+      this.killProcess(client.id);
+
       // Execute command using bash
       const childProcess = spawn('bash', ['-c', command], {
         cwd: process.env.HOME || '/root',
@@ -71,9 +72,10 @@ export class TerminalGateway {
       });
 
     } catch (error) {
-      client.emit('terminal:output', { 
-        output: `Erro ao executar comando: ${error.message}`, 
-        isError: true 
+      const message = error instanceof Error ? error.message : String(error);
+      client.emit('terminal:output', {
+        output: `Erro ao executar comando: ${message}`,
+        isError: true,
       });
       client.emit('terminal:complete', { exitCode: 1 });
     }
