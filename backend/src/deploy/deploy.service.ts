@@ -323,7 +323,7 @@ export class DeployService {
         
         if (missingDeps.length > 0) {
           this.log(app.name, `▶ Installing missing dev dependencies: ${missingDeps.join(', ')}...`, deploy.id);
-          await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')}`, releaseDir, app.name, deploy.id, envVarsObj);
+          await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')} --force`, releaseDir, app.name, deploy.id, envVarsObj);
           this.log(app.name, '✓ Dev dependencies installed', deploy.id);
         }
       }
