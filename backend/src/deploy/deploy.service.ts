@@ -1,4 +1,4 @@
- 
+
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { exec, spawn } from 'child_process';
 import * as fs from 'fs';
@@ -303,24 +303,24 @@ export class DeployService {
       // For NestJS projects, ensure required dev dependencies are available for TypeScript compilation
       if (app.type === 'nestjs') {
         const missingDeps: string[] = [];
-        
+
         // @types/node is ALWAYS required for any TypeScript project using process.env
         if (!fs.existsSync(path.join(releaseDir, 'node_modules', '@types', 'node'))) {
           missingDeps.push('@types/node');
         }
-        
+
         // typescript is ALWAYS required for TypeScript compilation
         if (!fs.existsSync(path.join(releaseDir, 'node_modules', 'typescript'))) {
           missingDeps.push('typescript');
         }
-        
+
         // @nestjs/cli is only needed if using default nest build command
         if (!options.buildCommand?.trim()) {
           if (!fs.existsSync(path.join(releaseDir, 'node_modules', '.bin', 'nest'))) {
             missingDeps.push('@nestjs/cli');
           }
         }
-        
+
         if (missingDeps.length > 0) {
           this.log(app.name, `▶ Installing missing dev dependencies: ${missingDeps.join(', ')}...`, deploy.id);
           await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')} --force`, releaseDir, app.name, deploy.id, envVarsObj);
@@ -331,23 +331,23 @@ export class DeployService {
       // For Next.js projects, ensure required dev dependencies are available for build
       if (app.type === 'nextjs') {
         const missingDeps: string[] = [];
-        
+
         // ESLint is required for Next.js builds (linting step runs during build)
         if (!fs.existsSync(path.join(releaseDir, 'node_modules', 'eslint'))) {
           missingDeps.push('eslint');
         }
-        
+
         // @types/node is required for TypeScript projects
         if (!fs.existsSync(path.join(releaseDir, 'node_modules', '@types', 'node'))) {
           missingDeps.push('@types/node');
         }
-        
+
         // Check package.json for any missing @types packages that might be needed
         try {
           const packageJsonPath = path.join(releaseDir, 'package.json');
           const packageJson = JSON.parse(await fs.promises.readFile(packageJsonPath, 'utf-8'));
           const allDeps = { ...packageJson.dependencies, ...packageJson.devDependencies };
-          
+
           // Common packages that need @types
           const typesNeeded = ['nodemailer', 'express', 'cors', 'bcrypt', 'jsonwebtoken'];
           for (const pkg of typesNeeded) {
@@ -360,10 +360,10 @@ export class DeployService {
         } catch (e) {
           // Ignore errors reading package.json
         }
-        
+
         if (missingDeps.length > 0) {
           this.log(app.name, `▶ Installing missing dev dependencies: ${missingDeps.join(', ')}...`, deploy.id);
-          await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')}`, releaseDir, app.name, deploy.id, envVarsObj);
+          await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')} --force`, releaseDir, app.name, deploy.id, envVarsObj);
           this.log(app.name, '✓ Dev dependencies installed', deploy.id);
         }
       }
