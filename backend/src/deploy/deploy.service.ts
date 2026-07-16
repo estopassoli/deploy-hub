@@ -8,6 +8,16 @@ import { AppsService } from '../apps/apps.service';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployGateway } from './deploy.gateway';
+import {
+  detectPackageManager,
+  detectAppType,
+  readPackageName,
+  installCmd,
+  runScriptCmd,
+  execCmd,
+  turboBuildCmd,
+} from './package-manager';
+import type { PmInfo } from './package-manager';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -54,7 +64,7 @@ export class DeployService {
     }
   }
 
-  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; envVars?: string; generateSSL?: boolean }) {
+  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; envVars?: string; generateSSL?: boolean }) {
     // Validate required fields
     if (!data.name || !data.repository || !data.port || !data.type) {
       throw new BadRequestException('Missing required fields: name, repository, port, type');
@@ -68,7 +78,7 @@ export class DeployService {
     }
 
     // Store envVars and commands in app for future redeploys
-    if (data.envVars || data.installCommand || data.buildCommand || data.migrateCommand || data.startCommand) {
+    if (data.envVars || data.installCommand || data.buildCommand || data.migrateCommand || data.startCommand || data.appDir || data.workspacePackage) {
       app = await this.prisma.app.update({
         where: { id: app.id },
         data: {
@@ -77,6 +87,8 @@ export class DeployService {
           buildCommand: data.buildCommand ?? app.buildCommand,
           migrateCommand: data.migrateCommand ?? app.migrateCommand,
           startCommand: data.startCommand ?? app.startCommand,
+          appDir: data.appDir ?? app.appDir,
+          workspacePackage: data.workspacePackage ?? app.workspacePackage,
         },
       });
     }
@@ -263,32 +275,62 @@ export class DeployService {
         data: { commitHash: commitHash.trim(), commitMessage: commitMessage.trim() },
       });
 
-      // Write .env file if provided
+      // Resolve package manager + monorepo context (repo root = releaseDir)
+      const appDir = (app.appDir || '').trim();
+      const workspacePackage = (app.workspacePackage || '').trim();
+      const isMonorepo = Boolean(appDir || workspacePackage);
+      const appWorkDir = appDir ? path.join(releaseDir, appDir) : releaseDir;
+      const pkg = workspacePackage || (appDir ? readPackageName(appWorkDir) : undefined);
+      const pm: PmInfo = detectPackageManager(releaseDir);
+      this.log(
+        app.name,
+        `  Package manager: ${pm.name}${pm.version ? '@' + pm.version : ''}` +
+          (isMonorepo ? ` (monorepo — dir: ${appDir || '.'}, pkg: ${pkg ?? 'unknown'})` : ''),
+        deploy.id,
+      );
+      const detectedType = isMonorepo ? detectAppType(appWorkDir) : null;
+      const effectiveType: string = detectedType || app.type;
+      if (isMonorepo && detectedType && detectedType !== app.type) {
+        this.log(app.name, `  ⚠️ App type selected "${app.type}", detected "${detectedType}" from ${appDir}/package.json — using detected`, deploy.id);
+      }
+
+      // Write .env to the repo root and (in monorepo mode) the target app dir.
+      // Env vars are ALSO exported into every step's process env (see runCommand) and PM2 config.
       if (options.envVars) {
         this.log(app.name, '▶ Writing environment variables...', deploy.id);
-        const envPath = path.join(releaseDir, '.env');
-        await fs.promises.writeFile(envPath, options.envVars);
-        this.log(app.name, '✓ Environment file created', deploy.id);
+        await fs.promises.writeFile(path.join(releaseDir, '.env'), options.envVars);
+        if (appWorkDir !== releaseDir) {
+          await fs.promises.mkdir(appWorkDir, { recursive: true });
+          await fs.promises.writeFile(path.join(appWorkDir, '.env'), options.envVars);
+          this.log(app.name, `✓ Environment file written to repo root and ${appDir}/`, deploy.id);
+        } else {
+          this.log(app.name, '✓ Environment file created', deploy.id);
+        }
       }
 
       // Install dependencies with auto-recovery (pass env vars)
       this.setPhase(app.name, 'installing');
       this.log(app.name, '▶ Installing dependencies...', deploy.id);
-      await this.installDependencies(releaseDir, app.name, options.installCommand, deploy.id, envVarsObj);
+      await this.installDependencies(releaseDir, app.name, pm, options.installCommand, deploy.id, envVarsObj);
       this.log(app.name, '✓ Dependencies installed', deploy.id);
 
-      // Check for Prisma - run migrations if custom migrate command OR prisma detected
-      const hasPrisma = fs.existsSync(path.join(releaseDir, 'prisma', 'schema.prisma'));
+      // Prisma — detect schema at the app dir (monorepo) or repo root; scope commands to the workspace package.
+      const scopePkg = isMonorepo ? pkg : undefined;
+      const hasPrisma =
+        fs.existsSync(path.join(appWorkDir, 'prisma', 'schema.prisma')) ||
+        fs.existsSync(path.join(releaseDir, 'prisma', 'schema.prisma'));
       if (hasPrisma || options.migrateCommand) {
         this.setPhase(app.name, 'migrating');
         if (hasPrisma) {
+          const genCmd = execCmd(pm, { pkg: scopePkg, argv: ['prisma', 'generate'] });
           this.log(app.name, '▶ Generating Prisma client...', deploy.id);
-          await this.runCommand('npx prisma generate', releaseDir, app.name, deploy.id, envVarsObj);
+          await this.runCommand(genCmd, releaseDir, app.name, deploy.id, envVarsObj);
           this.log(app.name, '✓ Prisma client generated', deploy.id);
         }
 
-        // Run migrations - use custom command if provided
-        const migrateCmd = options.migrateCommand || (hasPrisma ? 'npx prisma migrate deploy' : null);
+        const migrateCmd =
+          options.migrateCommand ||
+          (hasPrisma ? execCmd(pm, { pkg: scopePkg, argv: ['prisma', 'migrate', 'deploy'] }) : null);
         if (migrateCmd) {
           this.log(app.name, '▶ Running migrations...', deploy.id);
           try {
@@ -300,81 +342,22 @@ export class DeployService {
         }
       }
 
-      // For NestJS projects, ensure required dev dependencies are available for TypeScript compilation
-      if (app.type === 'nestjs') {
-        const missingDeps: string[] = [];
-
-        // @types/node is ALWAYS required for any TypeScript project using process.env
-        if (!fs.existsSync(path.join(releaseDir, 'node_modules', '@types', 'node'))) {
-          missingDeps.push('@types/node');
-        }
-
-        // typescript is ALWAYS required for TypeScript compilation
-        if (!fs.existsSync(path.join(releaseDir, 'node_modules', 'typescript'))) {
-          missingDeps.push('typescript');
-        }
-
-        // @nestjs/cli is only needed if using default nest build command
-        if (!options.buildCommand?.trim()) {
-          if (!fs.existsSync(path.join(releaseDir, 'node_modules', '.bin', 'nest'))) {
-            missingDeps.push('@nestjs/cli');
-          }
-        }
-
-        if (missingDeps.length > 0) {
-          this.log(app.name, `▶ Installing missing dev dependencies: ${missingDeps.join(', ')}...`, deploy.id);
-          await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')} --force`, releaseDir, app.name, deploy.id, envVarsObj);
-          this.log(app.name, '✓ Dev dependencies installed', deploy.id);
-        }
-      }
-
-      // For Next.js projects, ensure required dev dependencies are available for build
-      if (app.type === 'nextjs') {
-        const missingDeps: string[] = [];
-
-        // ESLint is required for Next.js builds (linting step runs during build)
-        if (!fs.existsSync(path.join(releaseDir, 'node_modules', 'eslint'))) {
-          missingDeps.push('eslint');
-        }
-
-        // @types/node is required for TypeScript projects
-        if (!fs.existsSync(path.join(releaseDir, 'node_modules', '@types', 'node'))) {
-          missingDeps.push('@types/node');
-        }
-
-        // Check package.json for any missing @types packages that might be needed
-        try {
-          const packageJsonPath = path.join(releaseDir, 'package.json');
-          const packageJson = JSON.parse(await fs.promises.readFile(packageJsonPath, 'utf-8'));
-          const allDeps = { ...packageJson.dependencies, ...packageJson.devDependencies };
-
-          // Common packages that need @types
-          const typesNeeded = ['nodemailer', 'express', 'cors', 'bcrypt', 'jsonwebtoken'];
-          for (const pkg of typesNeeded) {
-            if (allDeps[pkg] && !allDeps[`@types/${pkg}`]) {
-              if (!fs.existsSync(path.join(releaseDir, 'node_modules', '@types', pkg))) {
-                missingDeps.push(`@types/${pkg}`);
-              }
-            }
-          }
-        } catch (e) {
-          // Ignore errors reading package.json
-        }
-
-        if (missingDeps.length > 0) {
-          this.log(app.name, `▶ Installing missing dev dependencies: ${missingDeps.join(', ')}...`, deploy.id);
-          await this.runCommand(`npm install --save-dev ${missingDeps.join(' ')} --force`, releaseDir, app.name, deploy.id, envVarsObj);
-          this.log(app.name, '✓ Dev dependencies installed', deploy.id);
-        }
-      }
-
-      // Build - use custom command if provided (and not empty), or npx nest build for NestJS, npm run build for others
+      // Build — custom command wins; else generate per package manager / monorepo / framework.
       this.setPhase(app.name, 'building');
       let buildCmd = options.buildCommand?.trim();
       if (!buildCmd) {
-        buildCmd = app.type === 'nestjs' ? 'npx nest build' : 'npm run build';
+        const hasTurbo = fs.existsSync(path.join(releaseDir, 'turbo.json'));
+        if (isMonorepo && pkg && hasTurbo) {
+          buildCmd = turboBuildCmd(pm, pkg);
+        } else if (isMonorepo && pkg) {
+          buildCmd = runScriptCmd(pm, { pkg, script: 'build' });
+        } else if (effectiveType === 'nestjs') {
+          buildCmd = execCmd(pm, { argv: ['nest', 'build'] });
+        } else {
+          buildCmd = runScriptCmd(pm, { script: 'build' });
+        }
       }
-      this.log(app.name, `▶ Building ${app.type} application...`, deploy.id);
+      this.log(app.name, `▶ Building ${effectiveType} application...`, deploy.id);
       await this.runCommand(buildCmd, releaseDir, app.name, deploy.id, envVarsObj);
       this.log(app.name, '✓ Build completed', deploy.id);
 
@@ -385,9 +368,13 @@ export class DeployService {
 
       // Start/restart PM2 (not for static) - include env vars in PM2 config
       this.setPhase(app.name, 'starting');
-      if (app.type !== 'vitejs') {
+      if (effectiveType !== 'vitejs') {
         this.log(app.name, '▶ Starting PM2 process...', deploy.id);
-        const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj, options.startCommand);
+        const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj, options.startCommand, {
+          pm,
+          pkg: isMonorepo ? pkg : undefined,
+          effectiveType,
+        });
         const configPath = path.join(APPS_DIR, app.name, 'ecosystem.config.js');
         await fs.promises.writeFile(configPath, pm2Config);
 
@@ -405,7 +392,8 @@ export class DeployService {
         const wwwDir = `/var/www/${app.name}`;
         await execAsync(`sudo mkdir -p ${wwwDir}`);
         await execAsync(`sudo rm -rf ${wwwDir}/*`);
-        await execAsync(`sudo cp -r ${currentLink}/dist/* ${wwwDir}/`);
+        const distDir = appDir ? `${currentLink}/${appDir}/dist` : `${currentLink}/dist`;
+        await execAsync(`sudo cp -r ${distDir}/* ${wwwDir}/`);
         await execAsync(`sudo chown -R www-data:www-data ${wwwDir}`);
         await execAsync(`sudo chmod -R 755 ${wwwDir}`);
         this.log(app.name, `✓ Static files copied to ${wwwDir}`, deploy.id);
@@ -551,63 +539,54 @@ export class DeployService {
     };
   }
 
-  /**
-   * Auto-diagnóstico de instalação de dependências
-   * Tenta npm ci, se falhar por lock file desatualizado, usa npm install
-   */
   private async installDependencies(
     cwd: string,
     appName: string,
+    pm: PmInfo,
     customCommand?: string,
     deployId?: string,
-    envVars?: Record<string, string>
+    envVars?: Record<string, string>,
   ): Promise<void> {
-    // Se tem comando customizado, usa diretamente
+    // Custom command wins verbatim.
     if (customCommand) {
       this.log(appName, `  Command: ${customCommand}`, deployId);
       await this.runCommand(customCommand, cwd, appName, deployId, envVars);
       return;
     }
 
-    // Verifica se package-lock.json existe
-    const hasLockFile = fs.existsSync(path.join(cwd, 'package-lock.json'));
-
-    if (!hasLockFile) {
-      this.log(appName, '  ⚠️ No package-lock.json found, using npm install', deployId);
-      this.log(appName, '  Command: npm install', deployId);
-      await this.runCommand('npm install', cwd, appName, deployId, envVars);
-      return;
+    // Enable Corepack when the repo pins a packageManager (non-fatal).
+    if (pm.viaCorepack) {
+      try {
+        this.log(appName, '  Enabling Corepack...', deployId);
+        await this.runCommand('corepack enable', cwd, appName, deployId, envVars);
+      } catch (e) {
+        this.log(appName, `  ⚠️ corepack enable failed (continuing): ${e.message}`, deployId);
+      }
     }
 
-    // Tenta npm ci primeiro (mais rápido e confiável)
+    // Install with devDependencies (build CLIs live there), frozen first.
+    const frozen = installCmd(pm, { includeDev: true, frozen: true });
     try {
-      this.log(appName, '  Command: npm ci --production=false', deployId);
-      await this.runCommand('npm ci --production=false', cwd, appName, deployId, envVars);
+      this.log(appName, `  Command: ${frozen}`, deployId);
+      await this.runCommand(frozen, cwd, appName, deployId, envVars);
     } catch (error) {
-      const errorMsg = error.message || '';
-
-      // Detecta erro de lock file desatualizado
-      if (errorMsg.includes('EUSAGE') ||
-        errorMsg.includes('package.json and package-lock.json') ||
-        errorMsg.includes('Missing:') ||
-        errorMsg.includes('out of sync')) {
-        this.log(appName, '', deployId);
-        this.log(appName, '  🔧 Auto-diagnóstico: Lock file desatualizado detectado', deployId);
-        this.log(appName, '  ⚡ Fallback: Usando npm install para sincronizar...', deployId);
-        this.log(appName, '  Command: npm install', deployId);
-
-        await this.runCommand('npm install', cwd, appName, deployId, envVars);
-
-        this.log(appName, '  ✓ Dependências sincronizadas via npm install', deployId);
-      } else {
-        // Outro tipo de erro, repassa
-        throw error;
-      }
+      const loose = installCmd(pm, { includeDev: true, frozen: false });
+      this.log(appName, '', deployId);
+      this.log(appName, '  🔧 Frozen install failed — retrying without frozen lockfile', deployId);
+      this.log(appName, `  Command: ${loose}`, deployId);
+      await this.runCommand(loose, cwd, appName, deployId, envVars);
     }
   }
 
-  private generatePM2Config(app: any, currentPath: string, envVars?: Record<string, string>, customStartCommand?: string): string {
-    const isSupported = ['nestjs', 'nextjs'].includes(app.type);
+  private generatePM2Config(
+    app: any,
+    currentPath: string,
+    envVars?: Record<string, string>,
+    customStartCommand?: string,
+    scope?: { pm: PmInfo; pkg?: string; effectiveType: string },
+  ): string {
+    const effectiveType = scope?.effectiveType || app.type;
+    const isSupported = ['nestjs', 'nextjs'].includes(effectiveType);
     if (!isSupported) return '';
 
     // Merge base env with user-provided env vars
@@ -653,9 +632,36 @@ ${envString}
 `;
     }
 
+    // Monorepo: run the start scoped to the workspace package (exec runs in the package dir; PORT is injected).
+    if (scope?.pkg) {
+      const startArgs =
+        effectiveType === 'nextjs'
+          ? execCmd(scope.pm, { pkg: scope.pkg, argv: ['next', 'start', '--port', String(app.port)] })
+          : runScriptCmd(scope.pm, { pkg: scope.pkg, script: 'start' });
+      const [script, ...rest] = startArgs.split(' ');
+      return `
+module.exports = {
+  apps: [{
+    name: '${app.name}',
+    cwd: '${currentPath}',
+    script: '${script}',
+    args: '${rest.join(' ')}',
+    interpreter: 'none',
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+${envString}
+    }
+  }]
+};
+`;
+    }
+
     // Para Next.js, usa comando direto para garantir que a porta configurada prevalece
     // sobre qualquer --port hardcoded no package.json
-    if (app.type === 'nextjs') {
+    if (effectiveType === 'nextjs') {
       return `
 module.exports = {
   apps: [{
@@ -676,14 +682,16 @@ ${envString}
 `;
     }
 
-    // Para NestJS e outros, usa npm run start
+    // Single-app NestJS/other: run the start script via the detected package manager.
+    const startCmd = runScriptCmd(scope?.pm || { name: 'npm', berry: false, viaCorepack: false }, { script: 'start' });
+    const [startScript, ...startRest] = startCmd.split(' ');
     return `
 module.exports = {
   apps: [{
     name: '${app.name}',
     cwd: '${currentPath}',
-    script: 'npm',
-    args: 'run start',
+    script: '${startScript}',
+    args: '${startRest.join(' ')}',
     interpreter: 'none',
     instances: 1,
     autorestart: true,

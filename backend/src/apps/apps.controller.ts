@@ -9,6 +9,8 @@ class CreateAppDto {
   domain?: string;
   repository: string;
   branch?: string;
+  appDir?: string;
+  workspacePackage?: string;
 }
 
 class UpdateAppDto {
@@ -19,6 +21,8 @@ class UpdateAppDto {
   buildCommand?: string;
   migrateCommand?: string;
   startCommand?: string;
+  appDir?: string;
+  workspacePackage?: string;
 }
 
 @Controller('apps')

@@ -45,6 +45,14 @@ class DeployDto {
 
   @IsOptional()
   @IsString()
+  appDir?: string;
+
+  @IsOptional()
+  @IsString()
+  workspacePackage?: string;
+
+  @IsOptional()
+  @IsString()
   envVars?: string;
 
   @IsOptional()

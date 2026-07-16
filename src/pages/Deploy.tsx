@@ -77,6 +77,8 @@ export default function Deploy() {
     buildCommand: '',
     migrateCommand: '',
     startCommand: '',
+    appDir: '',
+    workspacePackage: '',
     envVars: '',
     generateSSL: false,
   });
@@ -231,6 +233,8 @@ export default function Deploy() {
         buildCommand: formData.buildCommand || undefined,
         migrateCommand: formData.migrateCommand || undefined,
         startCommand: formData.startCommand || undefined,
+        appDir: formData.appDir || undefined,
+        workspacePackage: formData.workspacePackage || undefined,
         envVars: formData.envVars || undefined,
         generateSSL: formData.generateSSL,
       });
@@ -284,6 +288,8 @@ export default function Deploy() {
       buildCommand: '',
       migrateCommand: '',
       startCommand: '',
+      appDir: '',
+      workspacePackage: '',
       envVars: '',
       generateSSL: false,
     });
@@ -535,6 +541,40 @@ export default function Deploy() {
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   Leave blank to use default commands for each step.
+                </p>
+              </div>
+
+              {/* Monorepo Section */}
+              <div className="border-t border-border pt-4">
+                <h3 className="text-sm font-medium mb-4 flex items-center gap-2">
+                  <Server className="h-4 w-4" />
+                  Monorepo (optional)
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="appDir" className="text-xs">App Directory</Label>
+                    <Input
+                      id="appDir"
+                      placeholder="apps/backend"
+                      value={formData.appDir}
+                      onChange={(e) => setFormData({ ...formData, appDir: e.target.value })}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="workspacePackage" className="text-xs">Workspace package name</Label>
+                    <Input
+                      id="workspacePackage"
+                      placeholder="@blurp/backend"
+                      value={formData.workspacePackage}
+                      onChange={(e) => setFormData({ ...formData, workspacePackage: e.target.value })}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Fill these for pnpm/yarn workspaces. Install runs at the repo root; build/start are
+                  scoped to the package. The .env is written to both the repo root and the app directory.
                 </p>
               </div>
 

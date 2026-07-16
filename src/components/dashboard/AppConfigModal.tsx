@@ -30,6 +30,8 @@ interface ConfigForm {
   buildCommand: string;
   migrateCommand: string;
   startCommand: string;
+  appDir: string;
+  workspacePackage: string;
 }
 
 const defaultForm: ConfigForm = {
@@ -38,6 +40,8 @@ const defaultForm: ConfigForm = {
   buildCommand: '',
   migrateCommand: '',
   startCommand: '',
+  appDir: '',
+  workspacePackage: '',
 };
 
 export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: AppConfigModalProps) {
@@ -54,6 +58,8 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
       buildCommand: form.buildCommand !== originalForm.buildCommand,
       migrateCommand: form.migrateCommand !== originalForm.migrateCommand,
       startCommand: form.startCommand !== originalForm.startCommand,
+      appDir: form.appDir !== originalForm.appDir,
+      workspacePackage: form.workspacePackage !== originalForm.workspacePackage,
     };
     return modified;
   }, [form, originalForm]);
@@ -81,6 +87,8 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
         buildCommand: app.buildCommand ?? '',
         migrateCommand: app.migrateCommand ?? '',
         startCommand: app.startCommand ?? '',
+        appDir: app.appDir ?? '',
+        workspacePackage: app.workspacePackage ?? '',
       };
       
       setOriginalForm(loadedForm);
@@ -102,6 +110,8 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
       buildCommand: form.buildCommand,
       migrateCommand: form.migrateCommand,
       startCommand: form.startCommand,
+      appDir: form.appDir,
+      workspacePackage: form.workspacePackage,
     };
 
     console.log('[AppConfigModal] Saving config:', {
@@ -266,6 +276,40 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
                   className={getFieldClassName('startCommand')}
                   value={form.startCommand}
                   onChange={(e) => updateField('startCommand', e.target.value)}
+                />
+              </div>
+
+              {/* App Directory */}
+              <div className="space-y-1.5">
+                <Label htmlFor="cfgAppDir" className="text-sm flex items-center gap-2">
+                  App Directory (monorepo)
+                  {modifiedFields.appDir && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">modificado</span>
+                  )}
+                </Label>
+                <Input
+                  id="cfgAppDir"
+                  placeholder="apps/backend"
+                  className={getFieldClassName('appDir')}
+                  value={form.appDir}
+                  onChange={(e) => updateField('appDir', e.target.value)}
+                />
+              </div>
+
+              {/* Workspace package */}
+              <div className="space-y-1.5">
+                <Label htmlFor="cfgWorkspacePackage" className="text-sm flex items-center gap-2">
+                  Workspace package (monorepo)
+                  {modifiedFields.workspacePackage && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">modificado</span>
+                  )}
+                </Label>
+                <Input
+                  id="cfgWorkspacePackage"
+                  placeholder="@blurp/backend"
+                  className={getFieldClassName('workspacePackage')}
+                  value={form.workspacePackage}
+                  onChange={(e) => updateField('workspacePackage', e.target.value)}
                 />
               </div>
             </div>
