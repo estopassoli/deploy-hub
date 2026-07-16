@@ -7,6 +7,7 @@ import { EmailModule } from './email/email.module';
 import { LogsModule } from './logs/logs.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ProjectsModule } from './projects/projects.module';
 import { SystemModule } from './system/system.module';
 import { TerminalModule } from './terminal/terminal.module';
 import { WebhookModule } from './webhook/webhook.module';
@@ -18,6 +19,7 @@ import { WebhookModule } from './webhook/webhook.module';
     AuthModule,
     AppsModule,
     DeployModule,
+    ProjectsModule,
     WebhookModule,
     SystemModule,
     MetricsModule,
