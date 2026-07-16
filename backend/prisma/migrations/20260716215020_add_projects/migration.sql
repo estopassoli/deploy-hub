@@ -12,26 +12,6 @@ CREATE TABLE "Project" (
     "updatedAt" DATETIME NOT NULL
 );
 
--- CreateTable
-CREATE TABLE "AppMetric" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "appId" TEXT NOT NULL,
-    "cpu" REAL NOT NULL DEFAULT 0,
-    "memory" REAL NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "AppMetric_appId_fkey" FOREIGN KEY ("appId") REFERENCES "App" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
-
--- CreateTable
-CREATE TABLE "SystemSettings" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "emailEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "emailRecipient" TEXT,
-    "slackWebhook" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
-);
-
 -- RedefineTables
 PRAGMA defer_foreign_keys=ON;
 PRAGMA foreign_keys=OFF;
@@ -58,7 +38,7 @@ CREATE TABLE "new_App" (
     "projectId" TEXT,
     CONSTRAINT "App_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
-INSERT INTO "new_App" ("appDir", "branch", "createdAt", "currentPath", "domain", "id", "name", "port", "repository", "status", "type", "updatedAt", "webhookSecret", "workspacePackage") SELECT "appDir", "branch", "createdAt", "currentPath", "domain", "id", "name", "port", "repository", "status", "type", "updatedAt", "webhookSecret", "workspacePackage" FROM "App";
+INSERT INTO "new_App" ("appDir", "branch", "buildCommand", "createdAt", "currentPath", "domain", "envVars", "id", "installCommand", "migrateCommand", "name", "port", "repository", "startCommand", "status", "type", "updatedAt", "webhookSecret", "workspacePackage") SELECT "appDir", "branch", "buildCommand", "createdAt", "currentPath", "domain", "envVars", "id", "installCommand", "migrateCommand", "name", "port", "repository", "startCommand", "status", "type", "updatedAt", "webhookSecret", "workspacePackage" FROM "App";
 DROP TABLE "App";
 ALTER TABLE "new_App" RENAME TO "App";
 CREATE UNIQUE INDEX "App_name_key" ON "App"("name");
@@ -86,6 +66,3 @@ PRAGMA defer_foreign_keys=OFF;
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Project_name_key" ON "Project"("name");
-
--- CreateIndex
-CREATE INDEX "AppMetric_appId_createdAt_idx" ON "AppMetric"("appId", "createdAt");
