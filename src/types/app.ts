@@ -21,6 +21,8 @@ export interface App {
   versions: AppVersion[];
   repository: string;
   branch: string;
+  appDir?: string;
+  workspacePackage?: string;
   lastDeploy: string;
   cpu?: number;
   memory?: number;

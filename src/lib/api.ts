@@ -89,7 +89,7 @@ class ApiClient {
     });
   }
 
-  async updateApp(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string }) {
+  async updateApp(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string }) {
     return this.request<any>(`/apps/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -104,6 +104,8 @@ class ApiClient {
       buildCommand: app.buildCommand || '',
       migrateCommand: app.migrateCommand || '',
       startCommand: app.startCommand || '',
+      appDir: app.appDir || '',
+      workspacePackage: app.workspacePackage || '',
     };
   }
 
@@ -157,8 +159,10 @@ class ApiClient {
     buildCommand?: string;
     migrateCommand?: string;
     startCommand?: string;
-    envVars?: string; 
-    generateSSL?: boolean 
+    appDir?: string;
+    workspacePackage?: string;
+    envVars?: string;
+    generateSSL?: boolean
   }) {
     return this.request<any>('/deploy', {
       method: 'POST',
