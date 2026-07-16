@@ -1,7 +1,7 @@
 # Design: Monorepo Projects (one shared clone/install → N services)
 
 **Date:** 2026-07-16
-**Status:** Approved (design), pending spec review
+**Status:** Implemented
 **Builds on:** `2026-07-16-monorepo-deploy-design.md` (package-manager detection, per-app `.env`, scoped build/start). Reuses `backend/src/deploy/package-manager.ts`.
 **Area:** `backend/src/projects` (new), `backend/src/deploy/deploy.service.ts`, `backend/prisma`, frontend new "Monorepo Project" wizard + dashboard grouping.
 
