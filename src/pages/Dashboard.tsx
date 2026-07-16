@@ -5,7 +5,8 @@ import {
   Activity, 
   AlertCircle,
   Plus,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
@@ -14,6 +15,17 @@ import { AppCard } from '@/components/dashboard/AppCard';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
 import { UsageChart } from '@/components/dashboard/UsageChart';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -105,6 +117,16 @@ export default function Dashboard() {
 
   const errorApps = apps.filter(app => app.status === 'error').length;
 
+  const handleDeleteProject = async (project: any) => {
+    try {
+      await api.deleteProject(project.id);
+      toast.success(`Projeto ${project.name} excluído`);
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao excluir projeto');
+    }
+  };
+
   const projectIds = new Set(projects.map((p) => p.id));
   const standaloneApps = apps.filter((a) => !a.projectId || !projectIds.has(a.projectId));
   const appsByProject = (pid: string) => apps.filter((a) => a.projectId === pid);
@@ -178,9 +200,37 @@ export default function Dashboard() {
                       <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
                       <p className="text-xs text-muted-foreground font-mono">{project.branch} · {project.packageManager || '—'}</p>
                     </div>
-                    <Button size="sm" variant="outline" onClick={() => api.redeployProject(project.id).then(() => toast.success('Redeploy iniciado')).catch((e) => toast.error(e.message))}>
-                      Redeploy project
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" onClick={() => api.redeployProject(project.id).then(() => toast.success('Redeploy iniciado')).catch((e) => toast.error(e.message))}>
+                        Redeploy project
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" title="Excluir projeto">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Excluir projeto {project.name}?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Isso vai parar e remover os {appsByProject(project.id).length} services do projeto
+                              (processos PM2, configs do Nginx, arquivos em /var/www e em ~/apps/{project.name}) e apagar
+                              os registros. Esta ação é irreversível.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              onClick={() => handleDeleteProject(project)}
+                            >
+                              Excluir projeto
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
                   <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
                     {appsByProject(project.id).map((app) => (
