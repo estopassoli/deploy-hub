@@ -23,6 +23,7 @@ export interface App {
   branch: string;
   appDir?: string;
   workspacePackage?: string;
+  projectId?: string;
   lastDeploy: string;
   cpu?: number;
   memory?: number;
@@ -54,4 +55,23 @@ export interface SystemStats {
   cpuUsage: number;
   memoryUsage: number;
   diskUsage: number;
+}
+
+export interface DetectedService {
+  appDir: string;
+  workspacePackage: string;
+  type: AppType;
+  suggestedPort: number | null;
+  suggestedName: string;
+  hasPrisma: boolean;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  repository: string;
+  branch: string;
+  packageManager?: string;
+  status: AppStatus;
+  apps: App[];
 }

@@ -237,6 +237,41 @@ class ApiClient {
   async getAppMetrics(appId: string, hours: number = 1) {
     return this.request<Array<{ cpu: number; memory: number; time: string }>>(`/metrics/${appId}?hours=${hours}`);
   }
+
+  // Projects (monorepo)
+  async detectProject(data: { repository: string; branch?: string }) {
+    return this.request<{ packageManager: string; services: Array<{ appDir: string; workspacePackage: string; type: string; suggestedPort: number | null; suggestedName: string; hasPrisma: boolean }> }>('/projects/detect', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createProject(data: {
+    name: string;
+    repository: string;
+    branch?: string;
+    envVars?: string;
+    generateSSL?: boolean;
+    services: Array<{ name: string; appDir: string; workspacePackage?: string; type: string; port: number; domain?: string; envVars?: string }>;
+  }) {
+    return this.request<any>('/projects', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  async getProjects() {
+    return this.request<any[]>('/projects');
+  }
+
+  async redeployProject(id: string) {
+    return this.request<any>(`/projects/${id}/redeploy`, { method: 'POST' });
+  }
+
+  async rollbackProject(id: string, deployId: string) {
+    return this.request<any>(`/projects/${id}/rollback/${deployId}`, { method: 'POST' });
+  }
+
+  async deleteProject(id: string) {
+    return this.request<any>(`/projects/${id}`, { method: 'DELETE' });
+  }
 }
 
 export const api = new ApiClient();
