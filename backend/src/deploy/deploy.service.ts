@@ -16,6 +16,7 @@ import {
   runScriptCmd,
   execCmd,
   turboBuildCmd,
+  turboBuildManyCmd,
 } from './package-manager';
 import type { PmInfo } from './package-manager';
 
@@ -537,6 +538,211 @@ export class DeployService {
       logs: deploy.logs || 'No logs available for this deploy.',
       createdAt: deploy.createdAt,
     };
+  }
+
+  async deployProject(projectId: string, opts: { generateSSL?: boolean } = {}) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, include: { apps: true } });
+    if (!project) throw new BadRequestException('Projeto não encontrado');
+    const services = project.apps;
+    if (services.length === 0) throw new BadRequestException('Projeto sem services');
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
+    const releaseDir = path.join(APPS_DIR, project.name, 'releases', timestamp);
+    const currentLink = path.join(APPS_DIR, project.name, 'current');
+    const key = project.name; // log/stream key
+
+    const deploy = await this.prisma.deploy.create({
+      data: { projectId: project.id, version: timestamp, path: releaseDir, status: 'building' },
+    });
+    this.log(key, '▶ Starting project deploy...', deploy.id);
+    this.log(key, `  Project: ${project.name} — ${services.length} services`, deploy.id);
+    await this.prisma.project.update({ where: { id: project.id }, data: { status: 'deploying' } });
+
+    try {
+      await fs.promises.mkdir(path.join(APPS_DIR, project.name, 'releases'), { recursive: true });
+
+      // Clone once
+      this.setPhase(key, 'cloning');
+      this.log(key, '▶ Cloning repository (once)...', deploy.id);
+      await execAsync(`git clone --depth 1 --branch ${project.branch} ${project.repository} ${releaseDir}`);
+      const { stdout: commitHash } = await execAsync(`cd ${releaseDir} && git rev-parse --short HEAD`);
+      const { stdout: commitMessage } = await execAsync(`cd ${releaseDir} && git log -1 --pretty=%s`);
+      await this.prisma.deploy.update({ where: { id: deploy.id }, data: { commitHash: commitHash.trim(), commitMessage: commitMessage.trim() } });
+      this.log(key, `✓ Cloned @ ${commitHash.trim()}`, deploy.id);
+
+      const pm: PmInfo = detectPackageManager(releaseDir);
+      await this.prisma.project.update({ where: { id: project.id }, data: { packageManager: pm.name } });
+      this.log(key, `  Package manager: ${pm.name}${pm.version ? '@' + pm.version : ''}`, deploy.id);
+
+      // Env: project (root) + per-service (app dir) — the latter makes the single shared build bake each NEXT_PUBLIC_* right.
+      const projectEnv = this.parseEnvVars(project.envVars || undefined);
+      if (project.envVars) {
+        await fs.promises.writeFile(path.join(releaseDir, '.env'), project.envVars);
+        this.log(key, '✓ Project .env written to repo root', deploy.id);
+      }
+      for (const svc of services) {
+        if (svc.envVars && svc.appDir) {
+          const dir = path.join(releaseDir, svc.appDir);
+          await fs.promises.mkdir(dir, { recursive: true });
+          await fs.promises.writeFile(path.join(dir, '.env'), svc.envVars);
+          this.log(key, `✓ [${svc.name}] .env → ${svc.appDir}/`, deploy.id);
+        }
+      }
+
+      // Install once at root
+      this.setPhase(key, 'installing');
+      this.log(key, '▶ Installing dependencies (root, once)...', deploy.id);
+      await this.installDependencies(releaseDir, key, pm, undefined, deploy.id, projectEnv);
+      this.log(key, '✓ Dependencies installed', deploy.id);
+
+      // Prisma per service
+      this.setPhase(key, 'migrating');
+      for (const svc of services) {
+        const svcDir = svc.appDir ? path.join(releaseDir, svc.appDir) : releaseDir;
+        const hasPrisma = fs.existsSync(path.join(svcDir, 'prisma', 'schema.prisma'));
+        if (!hasPrisma && !svc.migrateCommand) continue;
+        const svcEnv = { ...projectEnv, ...this.parseEnvVars(svc.envVars || undefined) };
+        const pkg = svc.workspacePackage || undefined;
+        if (hasPrisma) {
+          this.log(key, `▶ [${svc.name}] Prisma generate...`, deploy.id);
+          await this.runCommand(execCmd(pm, { pkg, argv: ['prisma', 'generate'] }), releaseDir, key, deploy.id, svcEnv);
+        }
+        const migrateCmd = svc.migrateCommand || (hasPrisma ? execCmd(pm, { pkg, argv: ['prisma', 'migrate', 'deploy'] }) : null);
+        if (migrateCmd) {
+          this.log(key, `▶ [${svc.name}] Migrations...`, deploy.id);
+          try {
+            await this.runCommand(migrateCmd, releaseDir, key, deploy.id, svcEnv);
+          } catch {
+            this.log(key, `  ⚠ [${svc.name}] no migrations or error`, deploy.id);
+          }
+        }
+      }
+
+      // Build once
+      this.setPhase(key, 'building');
+      const pkgs = services.map((s) => s.workspacePackage).filter((p): p is string => Boolean(p));
+      const hasTurbo = fs.existsSync(path.join(releaseDir, 'turbo.json'));
+      if (hasTurbo && pkgs.length) {
+        this.log(key, `▶ Building ${pkgs.length} services with Turbo...`, deploy.id);
+        await this.runCommand(turboBuildManyCmd(pm, pkgs), releaseDir, key, deploy.id, projectEnv);
+      } else {
+        for (const svc of services) {
+          if (!svc.workspacePackage) continue;
+          this.log(key, `▶ [${svc.name}] Building...`, deploy.id);
+          await this.runCommand(runScriptCmd(pm, { pkg: svc.workspacePackage, script: 'build' }), releaseDir, key, deploy.id, projectEnv);
+        }
+      }
+      this.log(key, '✓ Build completed', deploy.id);
+
+      // Shared symlink
+      await execAsync(`rm -f ${currentLink} && ln -s ${releaseDir} ${currentLink}`);
+      this.log(key, `✓ ${currentLink} → ${releaseDir}`, deploy.id);
+
+      // Start each service (partial failure allowed)
+      this.setPhase(key, 'starting');
+      const failures: string[] = [];
+      for (const svc of services) {
+        try {
+          await this.startService(project.name, svc, currentLink, pm, projectEnv, opts.generateSSL);
+          await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', currentPath: releaseDir } });
+        } catch (e) {
+          failures.push(svc.name);
+          this.log(key, `❌ [${svc.name}] start failed: ${e.message}`, deploy.id);
+          await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'error' } });
+        }
+      }
+
+      const ok = failures.length === 0;
+      const projFailed = failures.length === services.length;
+      await this.prisma.deploy.updateMany({ where: { projectId: project.id }, data: { isCurrent: false } });
+      await this.persistLogs(deploy.id);
+      await this.prisma.deploy.update({ where: { id: deploy.id }, data: { status: projFailed ? 'failed' : 'success', isCurrent: !projFailed } });
+      await this.prisma.project.update({ where: { id: project.id }, data: { status: projFailed ? 'error' : 'running', currentPath: releaseDir } });
+      this.log(key, ok ? '🚀 Project deploy completed!' : (projFailed ? '❌ Project deploy failed' : `⚠️ Partial deploy — failed: ${failures.join(', ')}`), deploy.id);
+      this.deployGateway.emitDeployComplete(key, !projFailed, { version: timestamp, deploy, failures });
+      return { success: !projFailed, partial: !ok && !projFailed, failures, version: timestamp, deploy };
+    } catch (error) {
+      const msg = error.message || 'Unknown error';
+      this.log(key, `❌ Project deploy failed: ${msg}`, deploy.id);
+      await this.persistLogs(deploy.id);
+      await this.prisma.deploy.update({ where: { id: deploy.id }, data: { status: 'failed' } });
+      await this.prisma.project.update({ where: { id: project.id }, data: { status: 'error' } });
+      this.deployGateway.emitDeployComplete(key, false, { error: msg });
+      throw new BadRequestException(`Deploy do projeto falhou: ${msg}`);
+    }
+  }
+
+  private async startService(
+    projectName: string,
+    svc: any,
+    currentLink: string,
+    pm: PmInfo,
+    projectEnv: Record<string, string>,
+    generateSSL?: boolean,
+  ) {
+    const svcWorkDir = svc.appDir ? path.join(currentLink, svc.appDir) : currentLink;
+    const effectiveType = detectAppType(svcWorkDir) || svc.type;
+    const svcEnv = { ...projectEnv, ...this.parseEnvVars(svc.envVars || undefined) };
+
+    if (effectiveType !== 'vitejs') {
+      const cfg = this.generatePM2Config(svc, currentLink, svcEnv, svc.startCommand || undefined, {
+        pm,
+        pkg: svc.workspacePackage || undefined,
+        effectiveType,
+      });
+      const cfgPath = path.join(APPS_DIR, projectName, `${svc.name}.ecosystem.config.js`);
+      await fs.promises.writeFile(cfgPath, cfg);
+      try {
+        await execAsync(`pm2 delete ${svc.name}`);
+      } catch {
+        /* not running */
+      }
+      await execAsync(`pm2 start ${cfgPath}`);
+      await execAsync('pm2 save');
+      this.log(projectName, `✓ [${svc.name}] PM2 on port ${svc.port}`);
+    } else {
+      const wwwDir = `/var/www/${svc.name}`;
+      await execAsync(`sudo mkdir -p ${wwwDir}`);
+      await execAsync(`sudo rm -rf ${wwwDir}/*`);
+      const distDir = svc.appDir ? `${currentLink}/${svc.appDir}/dist` : `${currentLink}/dist`;
+      await execAsync(`sudo cp -r ${distDir}/* ${wwwDir}/`);
+      await execAsync(`sudo chown -R www-data:www-data ${wwwDir}`);
+      await execAsync(`sudo chmod -R 755 ${wwwDir}`);
+      this.log(projectName, `✓ [${svc.name}] static → ${wwwDir}`);
+    }
+
+    await this.updateNginxConfig(svc);
+    if (generateSSL && svc.domain) {
+      try {
+        await execAsync('which certbot');
+        await this.runCommand(`sudo certbot --nginx -d ${svc.domain} --non-interactive --agree-tos --email admin@${svc.domain}`, '/tmp', projectName);
+      } catch (e) {
+        this.log(projectName, `  ⚠️ [${svc.name}] SSL skipped: ${e.message}`);
+      }
+    }
+  }
+
+  async rollbackProject(projectId: string, deployId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, include: { apps: true } });
+    if (!project) throw new BadRequestException('Projeto não encontrado');
+    const deploy = await this.prisma.deploy.findUnique({ where: { id: deployId } });
+    if (!deploy || deploy.projectId !== projectId) throw new BadRequestException('Deploy não encontrado');
+
+    const currentLink = path.join(APPS_DIR, project.name, 'current');
+    await execAsync(`rm -f ${currentLink} && ln -s ${deploy.path} ${currentLink}`);
+    for (const svc of project.apps) {
+      if (svc.type === 'vitejs') {
+        const wwwDir = `/var/www/${svc.name}`;
+        const distDir = svc.appDir ? `${deploy.path}/${svc.appDir}/dist` : `${deploy.path}/dist`;
+        await execAsync(`sudo rm -rf ${wwwDir}/* && sudo cp -r ${distDir}/* ${wwwDir}/`).catch(() => undefined);
+      } else {
+        await execAsync(`pm2 restart ${svc.name}`).catch(() => undefined);
+      }
+    }
+    await this.prisma.deploy.updateMany({ where: { projectId }, data: { isCurrent: false } });
+    await this.prisma.deploy.update({ where: { id: deployId }, data: { isCurrent: true } });
+    await this.prisma.project.update({ where: { id: projectId }, data: { currentPath: deploy.path } });
+    return { success: true, version: deploy.version };
   }
 
   private async installDependencies(
