@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import {
+  Boxes,
   Github,
   History,
   LayoutDashboard,
@@ -18,6 +19,7 @@ import { Link, useLocation } from 'react-router-dom';
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Deploy', href: '/deploy', icon: Rocket },
+  { name: 'Monorepo', href: '/projects/new', icon: Boxes },
   { name: 'Logs', href: '/logs', icon: ScrollText },
   { name: 'Versions', href: '/versions', icon: History },
   { name: 'Terminal', href: '/terminal', icon: Terminal },
