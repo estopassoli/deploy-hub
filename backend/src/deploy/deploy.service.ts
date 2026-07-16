@@ -54,7 +54,7 @@ export class DeployService {
     }
   }
 
-  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; envVars?: string; generateSSL?: boolean }) {
+  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; envVars?: string; generateSSL?: boolean }) {
     // Validate required fields
     if (!data.name || !data.repository || !data.port || !data.type) {
       throw new BadRequestException('Missing required fields: name, repository, port, type');
@@ -68,7 +68,7 @@ export class DeployService {
     }
 
     // Store envVars and commands in app for future redeploys
-    if (data.envVars || data.installCommand || data.buildCommand || data.migrateCommand || data.startCommand) {
+    if (data.envVars || data.installCommand || data.buildCommand || data.migrateCommand || data.startCommand || data.appDir || data.workspacePackage) {
       app = await this.prisma.app.update({
         where: { id: app.id },
         data: {
@@ -77,6 +77,8 @@ export class DeployService {
           buildCommand: data.buildCommand ?? app.buildCommand,
           migrateCommand: data.migrateCommand ?? app.migrateCommand,
           startCommand: data.startCommand ?? app.startCommand,
+          appDir: data.appDir ?? app.appDir,
+          workspacePackage: data.workspacePackage ?? app.workspacePackage,
         },
       });
     }

@@ -87,7 +87,7 @@ export class AppsService {
     return { ...app, ...pm2Status };
   }
 
-  async create(data: { name: string; type: string; port: number; domain?: string; repository: string; branch?: string }) {
+  async create(data: { name: string; type: string; port: number; domain?: string; repository: string; branch?: string; appDir?: string; workspacePackage?: string }) {
     // Check if port is available
     const existingPort = await this.prisma.app.findFirst({ where: { port: data.port } });
     if (existingPort) {
@@ -111,6 +111,8 @@ export class AppsService {
         domain: data.domain,
         repository: data.repository,
         branch: data.branch || 'main',
+        appDir: data.appDir || null,
+        workspacePackage: data.workspacePackage || null,
         webhookSecret,
       },
     });
@@ -122,7 +124,7 @@ export class AppsService {
     return app;
   }
 
-  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string }) {
+  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string }) {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
@@ -138,6 +140,8 @@ export class AppsService {
     if (data.buildCommand !== undefined) updateData.buildCommand = data.buildCommand || null;
     if (data.migrateCommand !== undefined) updateData.migrateCommand = data.migrateCommand || null;
     if (data.startCommand !== undefined) updateData.startCommand = data.startCommand || null;
+    if (data.appDir !== undefined) updateData.appDir = data.appDir || null;
+    if (data.workspacePackage !== undefined) updateData.workspacePackage = data.workspacePackage || null;
 
     console.log('[AppsService] Update data to save:', JSON.stringify(updateData, null, 2));
 
