@@ -9,6 +9,9 @@ import {
   runScriptCmd,
   execCmd,
   turboBuildCmd,
+  turboBuildManyCmd,
+  parseWorkspaceGlobs,
+  parseStartPort,
   detectAppType,
   readPackageName,
   type PmInfo,
@@ -135,4 +138,37 @@ test('detectAppType next/nest/vite/null', () => {
 test('readPackageName reads name or undefined', () => {
   assert.equal(readPackageName(tmp({ 'package.json': JSON.stringify({ name: '@blurp/backend' }) })), '@blurp/backend');
   assert.equal(readPackageName(tmp({ 'package.json': '{}' })), undefined);
+});
+
+// --- turboBuildManyCmd ---
+test('turboBuildManyCmd multi-filter pnpm', () => {
+  assert.equal(
+    turboBuildManyCmd(pnpm, ['@blurp/backend', '@blurp/frontend']),
+    'pnpm exec turbo run build --filter=@blurp/backend --filter=@blurp/frontend',
+  );
+});
+test('turboBuildManyCmd single npm', () => {
+  assert.equal(turboBuildManyCmd(npm, ['@blurp/web']), 'npx turbo run build --filter=@blurp/web');
+});
+
+// --- parseWorkspaceGlobs ---
+test('parseWorkspaceGlobs from pnpm yaml', () => {
+  const yaml = 'packages:\n  - "packages/*"\n  - "apps/*"\n';
+  assert.deepEqual(parseWorkspaceGlobs(yaml, null), ['packages/*', 'apps/*']);
+});
+test('parseWorkspaceGlobs from package.json array', () => {
+  assert.deepEqual(parseWorkspaceGlobs(null, { workspaces: ['apps/*', 'libs/*'] }), ['apps/*', 'libs/*']);
+});
+test('parseWorkspaceGlobs from package.json object', () => {
+  assert.deepEqual(parseWorkspaceGlobs(null, { workspaces: { packages: ['apps/*'] } }), ['apps/*']);
+});
+test('parseWorkspaceGlobs empty when none', () => {
+  assert.deepEqual(parseWorkspaceGlobs(null, {}), []);
+});
+
+// --- parseStartPort ---
+test('parseStartPort reads -p and --port', () => {
+  assert.equal(parseStartPort({ start: 'next start -p 3002' }), 3002);
+  assert.equal(parseStartPort({ start: 'node dist/main.js', dev: 'next dev --port 3000' }), 3000);
+  assert.equal(parseStartPort({ start: 'node dist/main.js' }), null);
 });

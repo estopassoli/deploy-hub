@@ -137,3 +137,36 @@ export function readPackageName(dir: string): string | undefined {
     return undefined;
   }
 }
+
+/** Turbo build scoped to several packages in one invocation (shared dep builds + cache). */
+export function turboBuildManyCmd(pm: PmInfo, pkgs: string[]): string {
+  return execCmd(pm, { argv: ['turbo', 'run', 'build', ...pkgs.map((p) => `--filter=${p}`)] });
+}
+
+/** Extract workspace glob patterns from pnpm-workspace.yaml text or a package.json object. */
+export function parseWorkspaceGlobs(pnpmYaml: string | null, pkgJson: any | null): string[] {
+  const globs: string[] = [];
+  if (pnpmYaml) {
+    // Minimal parse: lines like `  - "apps/*"` / `  - 'apps/*'` / `  - apps/*`
+    for (const raw of pnpmYaml.split('\n')) {
+      const m = raw.match(/^\s*-\s*['"]?([^'"#]+?)['"]?\s*$/);
+      if (m && m[1] && !m[1].startsWith('!')) globs.push(m[1].trim());
+    }
+  }
+  if (globs.length === 0 && pkgJson && pkgJson.workspaces) {
+    const ws = pkgJson.workspaces;
+    const arr = Array.isArray(ws) ? ws : Array.isArray(ws.packages) ? ws.packages : [];
+    for (const p of arr) if (typeof p === 'string' && !p.startsWith('!')) globs.push(p);
+  }
+  return globs;
+}
+
+/** First -p <n> / --port <n> found in a start/dev script, else null. */
+export function parseStartPort(scripts: { start?: string; dev?: string }): number | null {
+  for (const s of [scripts.start, scripts.dev]) {
+    if (!s) continue;
+    const m = s.match(/(?:-p|--port)[= ]+(\d+)/);
+    if (m) return parseInt(m[1], 10);
+  }
+  return null;
+}
