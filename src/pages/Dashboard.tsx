@@ -21,6 +21,7 @@ const REFRESH_INTERVAL = 5000; // 5 seconds for real-time metrics
 
 export default function Dashboard() {
   const [apps, setApps] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,10 +33,11 @@ export default function Dashboard() {
     
     try {
       // Use Promise.allSettled to prevent one failing request from blocking others
-      const [appsResult, statsResult, logsResult] = await Promise.allSettled([
+      const [appsResult, statsResult, logsResult, projectsResult] = await Promise.allSettled([
         api.getApps(),
         api.getStats(),
         api.getSystemLogs({ limit: 10 }),
+        api.getProjects(),
       ]);
       
       console.log('Apps result:', appsResult);
@@ -59,7 +61,9 @@ export default function Dashboard() {
       } else {
         console.error('Failed to load logs:', logsResult.reason);
       }
-      
+
+      if (projectsResult.status === 'fulfilled') setProjects(projectsResult.value || []);
+
       setLastUpdated(new Date());
     } catch (error: any) {
       console.error('Dashboard refresh error:', error);
@@ -100,6 +104,10 @@ export default function Dashboard() {
   }
 
   const errorApps = apps.filter(app => app.status === 'error').length;
+
+  const projectIds = new Set(projects.map((p) => p.id));
+  const standaloneApps = apps.filter((a) => !a.projectId || !projectIds.has(a.projectId));
+  const appsByProject = (pid: string) => apps.filter((a) => a.projectId === pid);
 
   return (
     <Layout>
@@ -159,17 +167,35 @@ export default function Dashboard() {
               <Server className="mx-auto h-10 w-10 md:h-12 md:w-12 text-muted-foreground" />
               <h3 className="mt-4 text-base md:text-lg font-medium">Nenhuma aplicação</h3>
               <p className="mt-2 text-sm text-muted-foreground">Comece fazendo seu primeiro deploy</p>
-              <Button asChild variant="gradient" className="mt-4">
-                <Link to="/deploy">Novo Deploy</Link>
-              </Button>
+              <Button asChild variant="gradient" className="mt-4"><Link to="/deploy">Novo Deploy</Link></Button>
             </div>
           ) : (
-            <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
-              {apps.map((app, index) => (
-                <div key={app.id} className={`opacity-0 animate-slide-in stagger-${Math.min(index + 1, 5)}`}>
-                  <AppCard app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
+            <div className="space-y-6">
+              {projects.map((project) => (
+                <div key={project.id} className="rounded-xl border border-border bg-card/40 p-3">
+                  <div className="mb-3 flex items-center justify-between px-1">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
+                      <p className="text-xs text-muted-foreground font-mono">{project.branch} · {project.packageManager || '—'}</p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => api.redeployProject(project.id).then(() => toast.success('Redeploy iniciado')).catch((e) => toast.error(e.message))}>
+                      Redeploy project
+                    </Button>
+                  </div>
+                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+                    {appsByProject(project.id).map((app) => (
+                      <AppCard key={app.id} app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
+                    ))}
+                  </div>
                 </div>
               ))}
+              {standaloneApps.length > 0 && (
+                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+                  {standaloneApps.map((app) => (
+                    <AppCard key={app.id} app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

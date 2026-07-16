@@ -38,12 +38,31 @@ model App {
   deploys         Deploy[]
   metrics         AppMetric[]
   webhookSecret   String?
+  projectId       String?
+  project         Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Project {
+  id             String   @id @default(uuid())
+  name           String   @unique
+  repository     String
+  branch         String   @default("main")
+  packageManager String?
+  envVars        String?
+  currentPath    String?
+  status         String   @default("stopped")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  apps           App[]
+  deploys        Deploy[]
 }
 
 model Deploy {
   id          String   @id @default(uuid())
-  appId       String
-  app         App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+  appId       String?
+  app         App?     @relation(fields: [appId], references: [id], onDelete: Cascade)
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
   version     String   // timestamp format: 2025-12-06_14-30-22
   commitHash  String?
   commitMessage String?

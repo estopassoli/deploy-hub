@@ -7,6 +7,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import Dashboard from "./pages/Dashboard";
 import Deploy from "./pages/Deploy";
+import Project from "./pages/Project";
 import Logs from "./pages/Logs";
 import Versions from "./pages/Versions";
 import GitHub from "./pages/GitHub";
@@ -28,6 +29,7 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/deploy" element={<ProtectedRoute><Deploy /></ProtectedRoute>} />
+            <Route path="/projects/new" element={<ProtectedRoute><Project /></ProtectedRoute>} />
             <Route path="/logs" element={<ProtectedRoute><Logs /></ProtectedRoute>} />
             <Route path="/versions" element={<ProtectedRoute><Versions /></ProtectedRoute>} />
             <Route path="/github" element={<ProtectedRoute><GitHub /></ProtectedRoute>} />

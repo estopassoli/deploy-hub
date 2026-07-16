@@ -45,7 +45,7 @@ export class CleanupService {
         await this.prisma.systemLog.create({
           data: {
             level: 'info',
-            message: `Release antiga removida: ${deploy.app.name}/${deploy.version}`,
+            message: `Release antiga removida: ${deploy.app?.name ?? 'unknown'}/${deploy.version}`,
             source: 'cleanup',
             appId: deploy.appId,
           },
