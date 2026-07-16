@@ -368,9 +368,13 @@ export class DeployService {
 
       // Start/restart PM2 (not for static) - include env vars in PM2 config
       this.setPhase(app.name, 'starting');
-      if (app.type !== 'vitejs') {
+      if (effectiveType !== 'vitejs') {
         this.log(app.name, '▶ Starting PM2 process...', deploy.id);
-        const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj, options.startCommand);
+        const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj, options.startCommand, {
+          pm,
+          pkg: isMonorepo ? pkg : undefined,
+          effectiveType,
+        });
         const configPath = path.join(APPS_DIR, app.name, 'ecosystem.config.js');
         await fs.promises.writeFile(configPath, pm2Config);
 
@@ -388,7 +392,8 @@ export class DeployService {
         const wwwDir = `/var/www/${app.name}`;
         await execAsync(`sudo mkdir -p ${wwwDir}`);
         await execAsync(`sudo rm -rf ${wwwDir}/*`);
-        await execAsync(`sudo cp -r ${currentLink}/dist/* ${wwwDir}/`);
+        const distDir = appDir ? `${currentLink}/${appDir}/dist` : `${currentLink}/dist`;
+        await execAsync(`sudo cp -r ${distDir}/* ${wwwDir}/`);
         await execAsync(`sudo chown -R www-data:www-data ${wwwDir}`);
         await execAsync(`sudo chmod -R 755 ${wwwDir}`);
         this.log(app.name, `✓ Static files copied to ${wwwDir}`, deploy.id);
@@ -573,8 +578,15 @@ export class DeployService {
     }
   }
 
-  private generatePM2Config(app: any, currentPath: string, envVars?: Record<string, string>, customStartCommand?: string): string {
-    const isSupported = ['nestjs', 'nextjs'].includes(app.type);
+  private generatePM2Config(
+    app: any,
+    currentPath: string,
+    envVars?: Record<string, string>,
+    customStartCommand?: string,
+    scope?: { pm: PmInfo; pkg?: string; effectiveType: string },
+  ): string {
+    const effectiveType = scope?.effectiveType || app.type;
+    const isSupported = ['nestjs', 'nextjs'].includes(effectiveType);
     if (!isSupported) return '';
 
     // Merge base env with user-provided env vars
@@ -620,9 +632,36 @@ ${envString}
 `;
     }
 
+    // Monorepo: run the start scoped to the workspace package (exec runs in the package dir; PORT is injected).
+    if (scope?.pkg) {
+      const startArgs =
+        effectiveType === 'nextjs'
+          ? execCmd(scope.pm, { pkg: scope.pkg, argv: ['next', 'start', '--port', String(app.port)] })
+          : runScriptCmd(scope.pm, { pkg: scope.pkg, script: 'start' });
+      const [script, ...rest] = startArgs.split(' ');
+      return `
+module.exports = {
+  apps: [{
+    name: '${app.name}',
+    cwd: '${currentPath}',
+    script: '${script}',
+    args: '${rest.join(' ')}',
+    interpreter: 'none',
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+${envString}
+    }
+  }]
+};
+`;
+    }
+
     // Para Next.js, usa comando direto para garantir que a porta configurada prevalece
     // sobre qualquer --port hardcoded no package.json
-    if (app.type === 'nextjs') {
+    if (effectiveType === 'nextjs') {
       return `
 module.exports = {
   apps: [{
@@ -643,14 +682,16 @@ ${envString}
 `;
     }
 
-    // Para NestJS e outros, usa npm run start
+    // Single-app NestJS/other: run the start script via the detected package manager.
+    const startCmd = runScriptCmd(scope?.pm || { name: 'npm', berry: false, viaCorepack: false }, { script: 'start' });
+    const [startScript, ...startRest] = startCmd.split(' ');
     return `
 module.exports = {
   apps: [{
     name: '${app.name}',
     cwd: '${currentPath}',
-    script: 'npm',
-    args: 'run start',
+    script: '${startScript}',
+    args: '${startRest.join(' ')}',
     interpreter: 'none',
     instances: 1,
     autorestart: true,
