@@ -1,7 +1,7 @@
 # Design: Monorepo & package-manager-aware deploys
 
 **Date:** 2026-07-16
-**Status:** Approved (design), pending spec review
+**Status:** Implemented
 **Area:** `backend/src/deploy`, `backend/src/apps`, `backend/prisma`, frontend `src/pages/Deploy.tsx` + config modal
 
 ## Problem
