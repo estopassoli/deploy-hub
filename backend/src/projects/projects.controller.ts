@@ -65,6 +65,11 @@ export class ProjectsController {
     return this.projects.rollback(id, deployId);
   }
 
+  @Post(':id/generate-ssl')
+  generateSsl(@Param('id') id: string) {
+    return this.projects.generateSsl(id);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.projects.remove(id);
