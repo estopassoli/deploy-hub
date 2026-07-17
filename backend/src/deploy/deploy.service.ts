@@ -19,6 +19,7 @@ import {
   turboBuildManyCmd,
 } from './package-manager';
 import type { PmInfo } from './package-manager';
+import { proxyVhostConfig, staticVhostConfig } from './nginx-config';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -921,9 +922,14 @@ ${envString}
   // Move the following methods inside the DeployService class
 
   private async updateNginxConfig(app: any) {
+    // Preserve HTTPS across redeploys: if a Let's Encrypt cert already exists for this
+    // domain, regenerate the vhost WITH the :443 ssl block instead of an HTTP-only
+    // config (which would wipe certbot's SSL and make the domain fall through to the
+    // 443 default_server — i.e. another app).
+    const hasCert = Boolean(app.domain && fs.existsSync(`/etc/letsencrypt/live/${app.domain}/fullchain.pem`));
     const config = app.type === 'vitejs'
-      ? this.generateStaticNginxConfig(app)
-      : this.generateProxyNginxConfig(app);
+      ? staticVhostConfig({ domain: app.domain, appName: app.name, hasCert })
+      : proxyVhostConfig({ domain: app.domain, port: app.port, hasCert });
 
     const configPath = `/etc/nginx/sites-available/${app.name}.conf`;
     const enabledPath = `/etc/nginx/sites-enabled/${app.name}.conf`;
@@ -931,7 +937,7 @@ ${envString}
     // Write config to sites-available first
     const tempPath = `/tmp/${app.name}.nginx.conf`;
     await fs.promises.writeFile(tempPath, config);
-    this.log(app.name, `  Writing config to ${configPath}`);
+    this.log(app.name, `  Writing config to ${configPath}${hasCert ? ' (with HTTPS)' : ''}`);
 
     // Move to sites-available with sudo
     await execAsync(`sudo mv ${tempPath} ${configPath}`);
@@ -945,49 +951,5 @@ ${envString}
     await execAsync('sudo nginx -t');
     this.log(app.name, '  Nginx config test passed');
     await execAsync('sudo systemctl reload nginx');
-  }
-
-  private generateProxyNginxConfig(app: any): string {
-    return `server {
-    listen 80;
-    server_name ${app.domain || '_'};
-
-    location / {
-        proxy_pass http://127.0.0.1:${app.port};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 86400;
-    }
-}
-`;
-  }
-
-  private generateStaticNginxConfig(app: any): string {
-    // Use /var/www/{app_name} for static files - better permissions for Nginx
-    return `server {
-    listen 80;
-    server_name ${app.domain || '_'};
-    root /var/www/${app.name};
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
-}
-`;
   }
 }

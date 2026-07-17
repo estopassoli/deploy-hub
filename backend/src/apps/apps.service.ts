@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { proxyVhostConfig, staticVhostConfig } from '../deploy/nginx-config';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -400,57 +401,15 @@ export class AppsService {
   }
 
   private async updateNginxConfig(app: any) {
+    // Same SSL-preserving behavior as the deploy path: keep the certbot :443 block
+    // across config regenerations when a Let's Encrypt cert exists for the domain.
+    const hasCert = Boolean(app.domain && fs.existsSync(`/etc/letsencrypt/live/${app.domain}/fullchain.pem`));
     const config = app.type === 'vitejs'
-      ? this.generateStaticNginxConfig(app)
-      : this.generateProxyNginxConfig(app);
+      ? staticVhostConfig({ domain: app.domain, appName: app.name, hasCert })
+      : proxyVhostConfig({ domain: app.domain, port: app.port, hasCert });
 
     const configPath = `/etc/nginx/sites-enabled/${app.name}.conf`;
     await fs.promises.writeFile(configPath, config);
     await execAsync('nginx -t && nginx -s reload');
-  }
-
-  private generateProxyNginxConfig(app: any): string {
-    return `
-server {
-    listen 80;
-    server_name ${app.domain || app.name + '.localhost'};
-
-    location / {
-        proxy_pass http://127.0.0.1:${app.port};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-`;
-  }
-
-  private generateStaticNginxConfig(app: any): string {
-    // Use /var/www/{app_name} for static files - better permissions for Nginx
-    return `
-server {
-    listen 80;
-    server_name ${app.domain || app.name + '.localhost'};
-    root /var/www/${app.name};
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
-}
-`;
   }
 }
