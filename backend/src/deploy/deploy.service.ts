@@ -109,6 +109,14 @@ export class DeployService {
     const app = await this.prisma.app.findUnique({ where: { id: appId } });
     if (!app) throw new BadRequestException('App não encontrado');
 
+    // If this app is a service of a monorepo Project, redeploy the whole project
+    // (shared clone + layered project/service env). A standalone redeploy would clone
+    // into APPS_DIR/<app> and use ONLY app.envVars, dropping the shared project.envVars
+    // (REDIS_URL / JWT_* / ENCRYPTION_KEY / etc.) and breaking the service at boot.
+    if (app.projectId) {
+      return this.deployProject(app.projectId, {});
+    }
+
     // Use stored envVars and commands from the app
     return this.executeDeploy(app, {
       envVars: app.envVars || undefined,
