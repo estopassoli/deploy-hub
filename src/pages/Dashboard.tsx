@@ -6,7 +6,8 @@ import {
   AlertCircle,
   Plus,
   Loader2,
-  Trash2
+  Trash2,
+  ShieldCheck
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
@@ -38,6 +39,7 @@ export default function Dashboard() {
   const [logs, setLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [sslLoading, setSslLoading] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadData = useCallback(async (showLoader = false) => {
@@ -127,6 +129,28 @@ export default function Dashboard() {
     }
   };
 
+  const handleGenerateSsl = async (project: any) => {
+    setSslLoading(project.id);
+    const t = toast.loading(`Gerando SSL de ${project.name}...`);
+    try {
+      const res = await api.generateProjectSsl(project.id);
+      const results = res.results || [];
+      const failed = results.filter((r) => !r.ok);
+      if (results.length === 0) {
+        toast.info(res.message || 'Nenhum domínio configurado', { id: t });
+      } else if (failed.length === 0) {
+        toast.success(`SSL gerado: ${results.length}/${results.length} domínios OK`, { id: t });
+      } else {
+        toast.error(`${results.length - failed.length}/${results.length} OK · falhou: ${failed.map((r) => r.domain).join(', ')}`, { id: t });
+      }
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao gerar SSL', { id: t });
+    } finally {
+      setSslLoading(null);
+    }
+  };
+
   const projectIds = new Set(projects.map((p) => p.id));
   const standaloneApps = apps.filter((a) => !a.projectId || !projectIds.has(a.projectId));
   const appsByProject = (pid: string) => apps.filter((a) => a.projectId === pid);
@@ -201,6 +225,10 @@ export default function Dashboard() {
                       <p className="text-xs text-muted-foreground font-mono">{project.branch} · {project.packageManager || '—'}</p>
                     </div>
                     <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" disabled={sslLoading === project.id} onClick={() => handleGenerateSsl(project)} title="Gerar/renovar certificado SSL de todos os domínios do projeto">
+                        {sslLoading === project.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                        Gerar SSL
+                      </Button>
                       <Button size="sm" variant="outline" onClick={() => api.redeployProject(project.id).then(() => toast.success('Redeploy iniciado')).catch((e) => toast.error(e.message))}>
                         Redeploy project
                       </Button>

@@ -113,6 +113,21 @@ export class ProjectsService {
     return this.deployService.rollbackProject(id, deployId);
   }
 
+  /** Generate/refresh the Let's Encrypt certificate for every service of the project that has a domain. */
+  async generateSsl(id: string) {
+    const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    const withDomain = project.apps.filter((a) => a.domain);
+    if (withDomain.length === 0) {
+      return { results: [], message: 'Nenhum service com domínio configurado' };
+    }
+    const results: Array<{ domain: string | null; ok: boolean; error?: string }> = [];
+    for (const svc of withDomain) {
+      results.push(await this.deployService.generateSslForApp(svc));
+    }
+    return { results };
+  }
+
   async remove(id: string) {
     const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
     if (!project) throw new NotFoundException('Projeto não encontrado');

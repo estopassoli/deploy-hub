@@ -272,6 +272,10 @@ class ApiClient {
   async deleteProject(id: string) {
     return this.request<any>(`/projects/${id}`, { method: 'DELETE' });
   }
+
+  async generateProjectSsl(id: string) {
+    return this.request<{ results: Array<{ domain: string | null; ok: boolean; error?: string }>; message?: string }>(`/projects/${id}/generate-ssl`, { method: 'POST' });
+  }
 }
 
 export const api = new ApiClient();

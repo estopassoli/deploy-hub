@@ -128,6 +128,36 @@ export class DeployService {
     });
   }
 
+  /**
+   * Obtain/refresh a Let's Encrypt certificate for an app's domain via certbot, then
+   * rewrite its nginx vhost (which now includes the :443 block since the cert exists).
+   * Idempotent — certbot reuses a valid existing cert. Never throws; returns a result.
+   */
+  async generateSslForApp(app: any): Promise<{ domain: string | null; ok: boolean; error?: string }> {
+    if (!app.domain) return { domain: null, ok: false, error: 'sem domínio' };
+    try {
+      await execAsync('which certbot');
+    } catch {
+      return { domain: app.domain, ok: false, error: 'certbot não está instalado' };
+    }
+    const email = process.env.CERTBOT_EMAIL || `admin@${app.domain}`;
+    try {
+      this.log(app.name, `▶ Generating SSL for ${app.domain}...`);
+      await this.runCommand(
+        `sudo certbot --nginx -d ${app.domain} --non-interactive --agree-tos --email ${email}`,
+        '/tmp',
+        app.name,
+      );
+      // Normalize the vhost to our format (:80 + :443) now that the cert exists.
+      await this.updateNginxConfig(app);
+      this.log(app.name, `✓ SSL ready for ${app.domain}`);
+      return { domain: app.domain, ok: true };
+    } catch (e) {
+      this.log(app.name, `❌ SSL failed for ${app.domain}: ${e.message}`);
+      return { domain: app.domain, ok: false, error: e.message };
+    }
+  }
+
   private async runCommand(
     command: string,
     cwd: string,
