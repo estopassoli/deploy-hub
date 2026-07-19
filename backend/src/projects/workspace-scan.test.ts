@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { scanWorkspaceApps } from './workspace-scan.ts';
+import { scanWorkspaceApps, filterAvailableServices } from './workspace-scan.ts';
+import type { DetectedService } from './workspace-scan.ts';
 
 function fixture(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wsscan-'));
@@ -21,9 +22,6 @@ function fixture(): string {
   write('packages/ui/package.json', { name: '@blurp/ui', scripts: { build: 'tsc' } }); // lib: no framework/start -> excluded
   return dir;
 }
-
-import { filterAvailableServices } from './workspace-scan.ts';
-import type { DetectedService } from './workspace-scan.ts';
 
 function svc(appDir: string): DetectedService {
   return {
