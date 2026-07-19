@@ -221,7 +221,9 @@ export default function Dashboard() {
                 <div key={project.id} className="rounded-xl border border-border bg-card/40 p-3">
                   <div className="mb-3 flex items-center justify-between px-1">
                     <div>
-                      <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
+                      <Link to={`/projects/${project.id}`} className="text-sm font-semibold text-foreground hover:text-primary">
+                        {project.name}
+                      </Link>
                       <p className="text-xs text-muted-foreground font-mono">{project.branch} · {project.packageManager || '—'}</p>
                     </div>
                     <div className="flex items-center gap-2">
