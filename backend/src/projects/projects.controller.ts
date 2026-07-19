@@ -21,11 +21,6 @@ class ServiceDto {
   @IsOptional() @IsString() startCommand?: string;
 }
 
-class UpdateProjectDto {
-  @IsOptional() @IsString() envVars?: string;
-  @IsOptional() @IsString() branch?: string;
-}
-
 class CreateProjectDto {
   @IsString() name: string;
   @IsString() repository: string;
@@ -33,6 +28,11 @@ class CreateProjectDto {
   @IsOptional() @IsString() envVars?: string;
   @IsOptional() @IsBoolean() @Transform(({ value }) => value === true || value === 'true') generateSSL?: boolean;
   @IsArray() @ValidateNested({ each: true }) @Type(() => ServiceDto) services: ServiceDto[];
+}
+
+class UpdateProjectDto {
+  @IsOptional() @IsString() envVars?: string;
+  @IsOptional() @IsString() branch?: string;
 }
 
 @Controller('projects')
