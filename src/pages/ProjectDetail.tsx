@@ -16,6 +16,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { DeployLogPanel } from '@/components/projects/DeployLogPanel';
+import { ServiceConfigCard } from '@/components/projects/ServiceConfigCard';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -210,7 +211,15 @@ export default function ProjectDetail() {
 
         <div className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Services</h2>
-          {/* Task 6 renderiza <ServiceConfigCard> aqui */}
+          {services.map((svc: any) => (
+            <ServiceConfigCard
+              key={svc.id}
+              app={svc}
+              projectId={project.id}
+              canRemove={services.length > 1}
+              onChanged={() => load(false)}
+            />
+          ))}
         </div>
 
         {/* Task 7 renderiza <AddServiceForm> aqui */}
