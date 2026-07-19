@@ -276,6 +276,43 @@ class ApiClient {
   async generateProjectSsl(id: string) {
     return this.request<{ results: Array<{ domain: string | null; ok: boolean; error?: string }>; message?: string }>(`/projects/${id}/generate-ssl`, { method: 'POST' });
   }
+
+  async getProject(id: string) {
+    return this.request<any>(`/projects/${id}`);
+  }
+
+  async updateProject(id: string, data: { envVars?: string; branch?: string }) {
+    return this.request<any>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  async getAvailableServices(id: string, source: 'release' | 'repo' = 'release') {
+    return this.request<{
+      source: 'release' | 'repo';
+      services: Array<{ appDir: string; workspacePackage: string; type: string; suggestedPort: number | null; suggestedName: string; hasPrisma: boolean }>;
+      reason?: string;
+    }>(`/projects/${id}/available-services?source=${source}`);
+  }
+
+  async addProjectService(id: string, data: {
+    name: string;
+    appDir: string;
+    workspacePackage?: string;
+    type: string;
+    port: number;
+    domain?: string;
+    envVars?: string;
+    generateSSL?: boolean;
+  }) {
+    return this.request<any>(`/projects/${id}/services`, { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  async deployProjectService(id: string, appId: string) {
+    return this.request<any>(`/projects/${id}/services/${appId}/deploy`, { method: 'POST' });
+  }
+
+  async removeProjectService(id: string, appId: string) {
+    return this.request<any>(`/projects/${id}/services/${appId}`, { method: 'DELETE' });
+  }
 }
 
 export const api = new ApiClient();

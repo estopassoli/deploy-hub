@@ -7,7 +7,7 @@ import { promisify } from 'util';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployService } from '../deploy/deploy.service';
 import { detectPackageManager } from '../deploy/package-manager';
-import { scanWorkspaceApps } from './workspace-scan';
+import { scanWorkspaceApps, filterAvailableServices } from './workspace-scan';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -53,6 +53,49 @@ export class ProjectsService {
     });
     if (!project) throw new NotFoundException('Projeto não encontrado');
     return project;
+  }
+
+  /** Update project-level settings. Nothing is written to disk — it applies on the next deploy. */
+  async update(id: string, dto: { envVars?: string; branch?: string }) {
+    const project = await this.prisma.project.findUnique({ where: { id } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    const data: { envVars?: string | null; branch?: string } = {};
+    if (dto.envVars !== undefined) data.envVars = dto.envVars || null;
+    if (dto.branch) data.branch = dto.branch;
+    return this.prisma.project.update({ where: { id }, data, include: { apps: true } });
+  }
+
+  /**
+   * Monorepo apps that are not services of this project yet.
+   *
+   * `release` scans the deployed clone — instant, and guarantees the app can be built
+   * incrementally. `repo` clones the branch into a tmp dir to show apps added after the
+   * last deploy; those need a full "Redeploy project" before they can be added.
+   */
+  async availableServices(id: string, source: 'release' | 'repo' = 'release') {
+    const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    const existing = project.apps.map((a) => a.appDir || '');
+
+    if (source === 'release') {
+      const currentLink = path.join(APPS_DIR, project.name, 'current');
+      let releaseDir: string;
+      try {
+        releaseDir = await fs.promises.realpath(currentLink);
+      } catch {
+        return { source: 'release' as const, services: [], reason: 'no-release' as const };
+      }
+      return { source: 'release' as const, services: filterAvailableServices(scanWorkspaceApps(releaseDir), existing) };
+    }
+
+    const tmp = path.join(APPS_DIR, '.detect', crypto.randomUUID());
+    try {
+      await fs.promises.mkdir(path.dirname(tmp), { recursive: true });
+      await execAsync(`git clone --depth 1 --branch ${project.branch} ${project.repository} ${tmp}`);
+      return { source: 'repo' as const, services: filterAvailableServices(scanWorkspaceApps(tmp), existing) };
+    } finally {
+      await execAsync(`rm -rf ${tmp}`).catch(() => undefined);
+    }
   }
 
   async create(dto: { name: string; repository: string; branch?: string; envVars?: string; generateSSL?: boolean; services: ServiceInput[] }) {
@@ -106,6 +149,84 @@ export class ProjectsService {
     const project = await this.prisma.project.findUnique({ where: { id } });
     if (!project) throw new NotFoundException('Projeto não encontrado');
     this.deployService.deployProject(id, {}).catch((e) => console.error('[deployProject]', e?.message));
+    return { success: true };
+  }
+
+  /** Add one monorepo app as a service of a live project, then deploy just it. */
+  async addService(id: string, dto: ServiceInput & { generateSSL?: boolean }) {
+    const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+
+    if (await this.prisma.app.findUnique({ where: { name: dto.name } })) {
+      throw new ConflictException(`Nome ${dto.name} já está em uso`);
+    }
+    const portTaken = await this.prisma.app.findFirst({ where: { port: dto.port } });
+    if (portTaken) throw new ConflictException(`Porta ${dto.port} em uso por ${portTaken.name}`);
+    if (project.apps.some((a) => a.appDir === dto.appDir)) {
+      throw new ConflictException(`${dto.appDir} já é um service deste projeto`);
+    }
+    // Pre-flight, awaited: fails the request with a 400 instead of creating an App row
+    // that a fire-and-forget deploy would later orphan silently.
+    await this.deployService.assertReleaseReady(project, dto.appDir);
+
+    const app = await this.prisma.app.create({
+      data: {
+        name: dto.name,
+        type: dto.type,
+        port: dto.port,
+        domain: dto.domain || null,
+        repository: project.repository,
+        branch: project.branch,
+        appDir: dto.appDir,
+        workspacePackage: dto.workspacePackage || null,
+        envVars: dto.envVars || null,
+        migrateCommand: dto.migrateCommand || null,
+        startCommand: dto.startCommand || null,
+        webhookSecret: crypto.randomBytes(16).toString('hex'),
+        projectId: project.id,
+      },
+    });
+
+    // Fire-and-forget: logs stream over WebSocket keyed by project name.
+    this.deployService
+      .deployProjectService(project.id, app.id, { generateSSL: dto.generateSSL })
+      .catch((e) => console.error('[deployProjectService]', e?.message));
+    return app;
+  }
+
+  /** Re-apply one existing service (new env/domain) without touching the others. */
+  async redeployService(id: string, appId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    const svc = project.apps.find((a) => a.id === appId);
+    if (!svc) throw new NotFoundException('Service não encontrado neste projeto');
+    // Pre-flight, awaited: same 400 the client would otherwise never see.
+    await this.deployService.assertReleaseReady(project, svc.appDir);
+    this.deployService.deployProjectService(id, appId, {}).catch((e) => console.error('[deployProjectService]', e?.message));
+    return { success: true };
+  }
+
+  /** Remove a single service: PM2 process, nginx vhost, static dir, PM2 config, DB row. */
+  async removeService(id: string, appId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    const svc = project.apps.find((a) => a.id === appId);
+    if (!svc) throw new NotFoundException('Service não encontrado neste projeto');
+    if (project.apps.length === 1) {
+      throw new BadRequestException('Este é o último service do projeto — exclua o projeto inteiro.');
+    }
+
+    await execAsync(`pm2 delete ${svc.name}`).catch(() => undefined);
+    await execAsync(`sudo rm -f /etc/nginx/sites-available/${svc.name}.conf /etc/nginx/sites-enabled/${svc.name}.conf`).catch(() => undefined);
+    await execAsync(`sudo rm -rf /var/www/${svc.name}`).catch(() => undefined);
+    await execAsync(`rm -f ${path.join(APPS_DIR, project.name, `${svc.name}.ecosystem.config.js`)}`).catch(() => undefined);
+    await execAsync('pm2 save').catch(() => undefined);
+    await execAsync('sudo systemctl reload nginx').catch(() => undefined);
+    // AppMetric rows and this service's own Deploy rows (appId set) cascade on App delete
+    // (onDelete: Cascade in schema.prisma). Project-level Deploy rows — including the
+    // incremental deploys this service went through (projectId set, appId null) — are not
+    // tied to the App and are retained under the Project, so its deploy history survives.
+    await this.prisma.app.delete({ where: { id: appId } });
     return { success: true };
   }
 

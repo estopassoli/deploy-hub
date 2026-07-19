@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { scanWorkspaceApps } from './workspace-scan.ts';
+import { scanWorkspaceApps, filterAvailableServices } from './workspace-scan.ts';
+import type { DetectedService } from './workspace-scan.ts';
 
 function fixture(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wsscan-'));
@@ -22,6 +23,17 @@ function fixture(): string {
   return dir;
 }
 
+function svc(appDir: string): DetectedService {
+  return {
+    appDir,
+    workspacePackage: `@blurp/${appDir.split('/').pop()}`,
+    type: 'nestjs',
+    suggestedPort: null,
+    suggestedName: appDir.split('/').pop() || appDir,
+    hasPrisma: false,
+  };
+}
+
 test('scanWorkspaceApps finds the 3 blurp apps and excludes libs', () => {
   const services = scanWorkspaceApps(fixture()).sort((a, b) => a.appDir.localeCompare(b.appDir));
   assert.equal(services.length, 3);
@@ -34,4 +46,28 @@ test('scanWorkspaceApps finds the 3 blurp apps and excludes libs', () => {
   assert.equal(admin.type, 'nextjs');
   assert.equal(admin.suggestedPort, 3002);
   assert.ok(!services.some((s) => s.workspacePackage === '@blurp/ui'));
+});
+
+test('filterAvailableServices removes appDirs already deployed', () => {
+  const detected = [svc('apps/backend'), svc('apps/frontend'), svc('apps/baileys-api')];
+  const result = filterAvailableServices(detected, ['apps/backend', 'apps/frontend']);
+  assert.deepEqual(result.map((s) => s.appDir), ['apps/baileys-api']);
+});
+
+test('filterAvailableServices keeps everything when nothing is deployed', () => {
+  const detected = [svc('apps/backend'), svc('apps/admin')];
+  const result = filterAvailableServices(detected, []);
+  assert.deepEqual(result.map((s) => s.appDir), ['apps/backend', 'apps/admin']);
+});
+
+test('filterAvailableServices normalizes trailing slashes and ./ prefixes', () => {
+  const detected = [svc('apps/backend'), svc('apps/admin')];
+  const result = filterAvailableServices(detected, ['./apps/backend/', 'apps/admin']);
+  assert.deepEqual(result.map((s) => s.appDir), []);
+});
+
+test('filterAvailableServices ignores empty and null-ish appDirs in the existing list', () => {
+  const detected = [svc('apps/backend')];
+  const result = filterAvailableServices(detected, ['', '  ']);
+  assert.deepEqual(result.map((s) => s.appDir), ['apps/backend']);
 });
