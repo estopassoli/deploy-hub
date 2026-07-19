@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  Server, 
-  Rocket, 
-  Activity, 
+import {
+  Server,
+  Rocket,
+  Activity,
   AlertCircle,
   Plus,
   Loader2,
   Trash2,
-  ShieldCheck
+  ShieldCheck,
+  ChevronDown
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
@@ -27,6 +28,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { cn } from '@/lib/utils';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -40,6 +43,27 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [sslLoading, setSslLoading] = useState<string | null>(null);
+  // Collapsed project cards, persisted as one map so a reload keeps the layout.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('deployhub:projects-collapsed');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const toggleCollapsed = (projectId: string) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [projectId]: !prev[projectId] };
+      try {
+        localStorage.setItem('deployhub:projects-collapsed', JSON.stringify(next));
+      } catch {
+        /* storage cheio ou bloqueado — o toggle ainda vale na sessão */
+      }
+      return next;
+    });
+  };
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadData = useCallback(async (showLoader = false) => {
@@ -217,58 +241,81 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-6">
-              {projects.map((project) => (
-                <div key={project.id} className="rounded-xl border border-border bg-card/40 p-3">
-                  <div className="mb-3 flex items-center justify-between px-1">
-                    <div>
-                      <Link to={`/projects/${project.id}`} className="text-sm font-semibold text-foreground hover:text-primary">
-                        {project.name}
-                      </Link>
-                      <p className="text-xs text-muted-foreground font-mono">{project.branch} · {project.packageManager || '—'}</p>
+              {projects.map((project) => {
+                const svcs = appsByProject(project.id);
+                const running = svcs.filter((a) => a.status === 'running').length;
+                const errored = svcs.filter((a) => a.status === 'error').length;
+                const isOpen = !collapsed[project.id];
+                return (
+                  <Collapsible
+                    key={project.id}
+                    open={isOpen}
+                    onOpenChange={() => toggleCollapsed(project.id)}
+                    className="rounded-xl border border-border bg-card/40 p-3"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2 px-1">
+                      <CollapsibleTrigger className="flex flex-1 items-center gap-2 text-left">
+                        <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', !isOpen && '-rotate-90')} />
+                        <div>
+                          <Link
+                            to={`/projects/${project.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-sm font-semibold text-foreground hover:text-primary"
+                          >
+                            {project.name}
+                          </Link>
+                          <p className="text-xs text-muted-foreground font-mono">
+                            {project.branch} · {project.packageManager || '—'} · {svcs.length} services · {running} running
+                            {errored > 0 ? ` · ${errored} erro` : ''}
+                          </p>
+                        </div>
+                      </CollapsibleTrigger>
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="outline" disabled={sslLoading === project.id} onClick={() => handleGenerateSsl(project)} title="Gerar/renovar certificado SSL de todos os domínios do projeto">
+                          {sslLoading === project.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                          Gerar SSL
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => api.redeployProject(project.id).then(() => toast.success('Redeploy iniciado')).catch((e) => toast.error(e.message))}>
+                          Redeploy project
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" title="Excluir projeto">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Excluir projeto {project.name}?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Isso vai parar e remover os {svcs.length} services do projeto
+                                (processos PM2, configs do Nginx, arquivos em /var/www e em ~/apps/{project.name}) e apagar
+                                os registros. Esta ação é irreversível.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                onClick={() => handleDeleteProject(project)}
+                              >
+                                Excluir projeto
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" variant="outline" disabled={sslLoading === project.id} onClick={() => handleGenerateSsl(project)} title="Gerar/renovar certificado SSL de todos os domínios do projeto">
-                        {sslLoading === project.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                        Gerar SSL
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => api.redeployProject(project.id).then(() => toast.success('Redeploy iniciado')).catch((e) => toast.error(e.message))}>
-                        Redeploy project
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" title="Excluir projeto">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Excluir projeto {project.name}?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Isso vai parar e remover os {appsByProject(project.id).length} services do projeto
-                              (processos PM2, configs do Nginx, arquivos em /var/www e em ~/apps/{project.name}) e apagar
-                              os registros. Esta ação é irreversível.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                            <AlertDialogAction
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              onClick={() => handleDeleteProject(project)}
-                            >
-                              Excluir projeto
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </div>
-                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
-                    {appsByProject(project.id).map((app) => (
-                      <AppCard key={app.id} app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
-                    ))}
-                  </div>
-                </div>
-              ))}
+                    <CollapsibleContent>
+                      <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+                        {svcs.map((app) => (
+                          <AppCard key={app.id} app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
+                        ))}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                );
+              })}
               {standaloneApps.length > 0 && (
                 <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
                   {standaloneApps.map((app) => (
