@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { AddServiceForm } from '@/components/projects/AddServiceForm';
 import { DeployLogPanel } from '@/components/projects/DeployLogPanel';
 import { ServiceConfigCard } from '@/components/projects/ServiceConfigCard';
 import api from '@/lib/api';
@@ -222,7 +223,7 @@ export default function ProjectDetail() {
           ))}
         </div>
 
-        {/* Task 7 renderiza <AddServiceForm> aqui */}
+        <AddServiceForm projectId={project.id} projectName={project.name} onAdded={() => load(false)} />
 
         <DeployLogPanel projectName={project.name} />
       </div>
