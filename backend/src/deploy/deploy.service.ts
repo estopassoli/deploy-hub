@@ -711,6 +711,133 @@ export class DeployService {
     }
   }
 
+  /**
+   * Deploy a single service inside the project's CURRENT release.
+   *
+   * Unlike deployProject, this creates no new release and never moves the `current`
+   * symlink — the other services of the project keep running untouched. Used both to
+   * add a service to a live project and to re-apply a service's config (env, domain).
+   */
+  async deployProjectService(projectId: string, appId: string, opts: { generateSSL?: boolean } = {}) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, include: { apps: true } });
+    if (!project) throw new BadRequestException('Projeto não encontrado');
+    const svc = project.apps.find((a) => a.id === appId);
+    if (!svc) throw new BadRequestException('Service não pertence a este projeto');
+
+    const currentLink = path.join(APPS_DIR, project.name, 'current');
+    let releaseDir: string;
+    try {
+      releaseDir = await fs.promises.realpath(currentLink);
+    } catch {
+      throw new BadRequestException('Projeto sem release atual. Rode Redeploy project primeiro.');
+    }
+
+    const svcDir = svc.appDir ? path.join(releaseDir, svc.appDir) : releaseDir;
+    if (!fs.existsSync(svcDir)) {
+      let commit = 'desconhecido';
+      try {
+        const { stdout } = await execAsync(`cd ${releaseDir} && git rev-parse --short HEAD`);
+        commit = stdout.trim();
+      } catch {
+        /* release sem git */
+      }
+      throw new BadRequestException(
+        `${svc.appDir} não existe no release atual (commit ${commit}). Rode Redeploy project para trazer o código novo.`,
+      );
+    }
+
+    const key = project.name; // log/stream key — same as project deploys
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
+
+    // isCurrent stays false: an incremental deploy has no release of its own, and marking
+    // it current would make rollbackProject switch the symlink to the same dir (a no-op).
+    const deploy = await this.prisma.deploy.create({
+      data: {
+        projectId: project.id,
+        version: `${timestamp}-${svc.name}`,
+        path: releaseDir,
+        status: 'building',
+        isCurrent: false,
+      },
+    });
+
+    this.log(key, `▶ [${svc.name}] Incremental deploy into ${releaseDir}`, deploy.id);
+    await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'deploying' } });
+
+    try {
+      const pm: PmInfo = detectPackageManager(releaseDir);
+      this.log(key, `  Package manager: ${pm.name}${pm.version ? '@' + pm.version : ''}`, deploy.id);
+
+      // Env: project (repo root) + this service (its app dir).
+      const projectEnv = this.parseEnvVars(project.envVars || undefined);
+      if (project.envVars) {
+        await fs.promises.writeFile(path.join(releaseDir, '.env'), project.envVars);
+        this.log(key, '✓ Project .env written to repo root', deploy.id);
+      }
+      if (svc.envVars) {
+        await fs.promises.writeFile(path.join(svcDir, '.env'), svc.envVars);
+        this.log(key, `✓ [${svc.name}] .env → ${svc.appDir || '.'}/`, deploy.id);
+      }
+
+      // Install at the root — picks up the new package's dependencies.
+      this.setPhase(key, 'installing');
+      this.log(key, '▶ Installing dependencies (root)...', deploy.id);
+      await this.installDependencies(releaseDir, key, pm, undefined, deploy.id, projectEnv);
+      this.log(key, '✓ Dependencies installed', deploy.id);
+
+      // Prisma — only for this service.
+      this.setPhase(key, 'migrating');
+      const svcEnv = { ...projectEnv, ...this.parseEnvVars(svc.envVars || undefined) };
+      const pkg = svc.workspacePackage || undefined;
+      const hasPrisma = fs.existsSync(path.join(svcDir, 'prisma', 'schema.prisma'));
+      if (hasPrisma) {
+        this.log(key, `▶ [${svc.name}] Prisma generate...`, deploy.id);
+        await this.runCommand(execCmd(pm, { pkg, argv: ['prisma', 'generate'] }), releaseDir, key, deploy.id, svcEnv);
+      }
+      const migrateCmd = svc.migrateCommand || (hasPrisma ? execCmd(pm, { pkg, argv: ['prisma', 'migrate', 'deploy'] }) : null);
+      if (migrateCmd) {
+        this.log(key, `▶ [${svc.name}] Migrations...`, deploy.id);
+        try {
+          await this.runCommand(migrateCmd, releaseDir, key, deploy.id, svcEnv);
+        } catch {
+          this.log(key, `  ⚠ [${svc.name}] no migrations or error`, deploy.id);
+        }
+      }
+
+      // Build only this package. Turbo also rebuilds the workspace packages it depends on;
+      // running processes are unaffected (modules already loaded, same commit).
+      this.setPhase(key, 'building');
+      if (svc.workspacePackage) {
+        const hasTurbo = fs.existsSync(path.join(releaseDir, 'turbo.json'));
+        const buildCmd = hasTurbo
+          ? turboBuildCmd(pm, svc.workspacePackage)
+          : runScriptCmd(pm, { pkg: svc.workspacePackage, script: 'build' });
+        this.log(key, `▶ [${svc.name}] Building...`, deploy.id);
+        await this.runCommand(buildCmd, releaseDir, key, deploy.id, projectEnv);
+        this.log(key, '✓ Build completed', deploy.id);
+      }
+
+      // Start only this service — PM2/static + nginx + optional certbot.
+      this.setPhase(key, 'starting');
+      await this.startService(project.name, svc, currentLink, pm, projectEnv, opts.generateSSL);
+      await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', currentPath: releaseDir } });
+
+      await this.persistLogs(deploy.id);
+      await this.prisma.deploy.update({ where: { id: deploy.id }, data: { status: 'success' } });
+      this.log(key, `🚀 [${svc.name}] deployed — other services untouched`, deploy.id);
+      this.deployGateway.emitDeployComplete(key, true, { version: deploy.version, deploy });
+      return { success: true as const, version: deploy.version, deploy };
+    } catch (error) {
+      const msg = error.message || 'Unknown error';
+      this.log(key, `❌ [${svc.name}] deploy failed: ${msg}`, deploy.id);
+      await this.persistLogs(deploy.id);
+      await this.prisma.deploy.update({ where: { id: deploy.id }, data: { status: 'failed' } });
+      await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'error' } });
+      this.deployGateway.emitDeployComplete(key, false, { error: msg });
+      throw new BadRequestException(`Deploy do service falhou: ${msg}`);
+    }
+  }
+
   private async startService(
     projectName: string,
     svc: any,
