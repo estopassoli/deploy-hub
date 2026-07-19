@@ -7,7 +7,7 @@ import { promisify } from 'util';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployService } from '../deploy/deploy.service';
 import { detectPackageManager } from '../deploy/package-manager';
-import { scanWorkspaceApps } from './workspace-scan';
+import { scanWorkspaceApps, filterAvailableServices } from './workspace-scan';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -53,6 +53,49 @@ export class ProjectsService {
     });
     if (!project) throw new NotFoundException('Projeto não encontrado');
     return project;
+  }
+
+  /** Update project-level settings. Nothing is written to disk — it applies on the next deploy. */
+  async update(id: string, dto: { envVars?: string; branch?: string }) {
+    const project = await this.prisma.project.findUnique({ where: { id } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    const data: { envVars?: string | null; branch?: string } = {};
+    if (dto.envVars !== undefined) data.envVars = dto.envVars || null;
+    if (dto.branch) data.branch = dto.branch;
+    return this.prisma.project.update({ where: { id }, data, include: { apps: true } });
+  }
+
+  /**
+   * Monorepo apps that are not services of this project yet.
+   *
+   * `release` scans the deployed clone — instant, and guarantees the app can be built
+   * incrementally. `repo` clones the branch into a tmp dir to show apps added after the
+   * last deploy; those need a full "Redeploy project" before they can be added.
+   */
+  async availableServices(id: string, source: 'release' | 'repo' = 'release') {
+    const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    const existing = project.apps.map((a) => a.appDir || '');
+
+    if (source === 'release') {
+      const currentLink = path.join(APPS_DIR, project.name, 'current');
+      let releaseDir: string;
+      try {
+        releaseDir = await fs.promises.realpath(currentLink);
+      } catch {
+        return { source: 'release' as const, services: [], reason: 'no-release' as const };
+      }
+      return { source: 'release' as const, services: filterAvailableServices(scanWorkspaceApps(releaseDir), existing) };
+    }
+
+    const tmp = path.join(APPS_DIR, '.detect', crypto.randomUUID());
+    try {
+      await fs.promises.mkdir(path.dirname(tmp), { recursive: true });
+      await execAsync(`git clone --depth 1 --branch ${project.branch} ${project.repository} ${tmp}`);
+      return { source: 'repo' as const, services: filterAvailableServices(scanWorkspaceApps(tmp), existing) };
+    } finally {
+      await execAsync(`rm -rf ${tmp}`).catch(() => undefined);
+    }
   }
 
   async create(dto: { name: string; repository: string; branch?: string; envVars?: string; generateSSL?: boolean; services: ServiceInput[] }) {

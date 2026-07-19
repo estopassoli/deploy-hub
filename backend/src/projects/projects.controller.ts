@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -19,6 +19,11 @@ class ServiceDto {
   @IsOptional() @IsString() envVars?: string;
   @IsOptional() @IsString() migrateCommand?: string;
   @IsOptional() @IsString() startCommand?: string;
+}
+
+class UpdateProjectDto {
+  @IsOptional() @IsString() envVars?: string;
+  @IsOptional() @IsString() branch?: string;
 }
 
 class CreateProjectDto {
@@ -53,6 +58,16 @@ export class ProjectsController {
   @Post()
   create(@Body() dto: CreateProjectDto) {
     return this.projects.create(dto);
+  }
+
+  @Put(':id')
+  update(@Param('id') id: string, @Body() dto: UpdateProjectDto) {
+    return this.projects.update(id, dto);
+  }
+
+  @Get(':id/available-services')
+  availableServices(@Param('id') id: string, @Query('source') source?: string) {
+    return this.projects.availableServices(id, source === 'repo' ? 'repo' : 'release');
   }
 
   @Post(':id/redeploy')
