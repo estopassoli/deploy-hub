@@ -133,6 +133,8 @@ export default function ProjectDetail() {
   }
 
   const services = project.apps || [];
+  const statusLabel: Record<string, string> =
+    { running: 'rodando', stopped: 'parado', error: 'erro', deploying: 'deployando' };
 
   return (
     <Layout>
@@ -147,7 +149,10 @@ export default function ProjectDetail() {
             </Button>
             <h1 className="text-2xl md:text-3xl font-bold text-foreground">{project.name}</h1>
             <p className="mt-1 font-mono text-xs text-muted-foreground break-all">
-              {project.repository} · {project.branch} · {project.packageManager || '—'} · {services.length} services
+              {project.repository} · {project.branch} · {project.packageManager || '—'} · {services.length} services ·{' '}
+              <span className={project.status === 'error' ? 'text-destructive' : undefined}>
+                {statusLabel[project.status] || project.status}
+              </span>
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

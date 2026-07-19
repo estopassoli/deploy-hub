@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ProjectsService } from './projects.service';
@@ -10,7 +10,9 @@ class DetectDto {
 }
 
 class ServiceDto {
-  @IsString() name: string;
+  @IsString()
+  @Matches(/^[a-z0-9][a-z0-9-]*$/, { message: 'name deve conter apenas letras minúsculas, números e hífens, começando por letra ou número' })
+  name: string;
   @IsString() appDir: string;
   @IsOptional() @IsString() workspacePackage?: string;
   @IsString() @IsIn(['nestjs', 'nextjs', 'vitejs']) type: string;
@@ -32,7 +34,10 @@ class CreateProjectDto {
 
 class UpdateProjectDto {
   @IsOptional() @IsString() envVars?: string;
-  @IsOptional() @IsString() branch?: string;
+  @IsOptional()
+  @IsString()
+  @Matches(/^[\w.\-\/]+$/, { message: 'branch contém caracteres inválidos' })
+  branch?: string;
 }
 
 class AddServiceDto extends ServiceDto {

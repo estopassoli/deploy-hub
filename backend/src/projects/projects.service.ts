@@ -165,6 +165,9 @@ export class ProjectsService {
     if (project.apps.some((a) => a.appDir === dto.appDir)) {
       throw new ConflictException(`${dto.appDir} já é um service deste projeto`);
     }
+    // Pre-flight, awaited: fails the request with a 400 instead of creating an App row
+    // that a fire-and-forget deploy would later orphan silently.
+    await this.deployService.assertReleaseReady(project, dto.appDir);
 
     const app = await this.prisma.app.create({
       data: {
@@ -195,7 +198,10 @@ export class ProjectsService {
   async redeployService(id: string, appId: string) {
     const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
     if (!project) throw new NotFoundException('Projeto não encontrado');
-    if (!project.apps.some((a) => a.id === appId)) throw new NotFoundException('Service não encontrado neste projeto');
+    const svc = project.apps.find((a) => a.id === appId);
+    if (!svc) throw new NotFoundException('Service não encontrado neste projeto');
+    // Pre-flight, awaited: same 400 the client would otherwise never see.
+    await this.deployService.assertReleaseReady(project, svc.appDir);
     this.deployService.deployProjectService(id, appId, {}).catch((e) => console.error('[deployProjectService]', e?.message));
     return { success: true };
   }
@@ -216,7 +222,10 @@ export class ProjectsService {
     await execAsync(`rm -f ${path.join(APPS_DIR, project.name, `${svc.name}.ecosystem.config.js`)}`).catch(() => undefined);
     await execAsync('pm2 save').catch(() => undefined);
     await execAsync('sudo systemctl reload nginx').catch(() => undefined);
-    // Deploy and AppMetric rows cascade on App delete (onDelete: Cascade in schema.prisma).
+    // AppMetric rows and this service's own Deploy rows (appId set) cascade on App delete
+    // (onDelete: Cascade in schema.prisma). Project-level Deploy rows — including the
+    // incremental deploys this service went through (projectId set, appId null) — are not
+    // tied to the App and are retained under the Project, so its deploy history survives.
     await this.prisma.app.delete({ where: { id: appId } });
     return { success: true };
   }

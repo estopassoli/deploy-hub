@@ -36,11 +36,13 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
   const handleSave = async () => {
     setSaving(true);
     try {
+      // Send raw strings (not `|| undefined`) so clearing a field actually clears it:
+      // AppsService.update only writes fields that are !== undefined, and maps '' -> null.
       await api.updateApp(app.id, {
-        domain: domain || undefined,
+        domain,
         envVars,
-        startCommand: startCommand || undefined,
-        migrateCommand: migrateCommand || undefined,
+        startCommand,
+        migrateCommand,
       });
       toast.success(`${app.name} salvo — use "Deploy service" para aplicar`);
       onChanged();

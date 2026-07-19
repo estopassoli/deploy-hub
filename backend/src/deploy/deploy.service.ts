@@ -712,6 +712,38 @@ export class DeployService {
   }
 
   /**
+   * Resolve the project's current release and assert the service's appDir exists in it.
+   * Shared pre-flight for both deployProjectService and its callers — callers await this
+   * BEFORE creating the App/dispatching the deploy, so a bad release surfaces as a 400 to
+   * the client instead of failing silently inside a fire-and-forget deploy.
+   * Throws the client-facing BadRequestException; returns the resolved releaseDir.
+   */
+  async assertReleaseReady(project: { name: string }, appDir: string | null): Promise<string> {
+    const currentLink = path.join(APPS_DIR, project.name, 'current');
+    let releaseDir: string;
+    try {
+      releaseDir = await fs.promises.realpath(currentLink);
+    } catch {
+      throw new BadRequestException('Projeto sem release atual. Rode Redeploy project primeiro.');
+    }
+
+    const svcDir = appDir ? path.join(releaseDir, appDir) : releaseDir;
+    if (!fs.existsSync(svcDir)) {
+      let commit = 'desconhecido';
+      try {
+        const { stdout } = await execAsync(`cd ${releaseDir} && git rev-parse --short HEAD`);
+        commit = stdout.trim();
+      } catch {
+        /* release sem git */
+      }
+      throw new BadRequestException(
+        `${appDir} não existe no release atual (commit ${commit}). Rode Redeploy project para trazer o código novo.`,
+      );
+    }
+    return releaseDir;
+  }
+
+  /**
    * Deploy a single service inside the project's CURRENT release.
    *
    * Unlike deployProject, this creates no new release and never moves the `current`
@@ -725,26 +757,8 @@ export class DeployService {
     if (!svc) throw new BadRequestException('Service não pertence a este projeto');
 
     const currentLink = path.join(APPS_DIR, project.name, 'current');
-    let releaseDir: string;
-    try {
-      releaseDir = await fs.promises.realpath(currentLink);
-    } catch {
-      throw new BadRequestException('Projeto sem release atual. Rode Redeploy project primeiro.');
-    }
-
+    const releaseDir = await this.assertReleaseReady(project, svc.appDir);
     const svcDir = svc.appDir ? path.join(releaseDir, svc.appDir) : releaseDir;
-    if (!fs.existsSync(svcDir)) {
-      let commit = 'desconhecido';
-      try {
-        const { stdout } = await execAsync(`cd ${releaseDir} && git rev-parse --short HEAD`);
-        commit = stdout.trim();
-      } catch {
-        /* release sem git */
-      }
-      throw new BadRequestException(
-        `${svc.appDir} não existe no release atual (commit ${commit}). Rode Redeploy project para trazer o código novo.`,
-      );
-    }
 
     const key = project.name; // log/stream key — same as project deploys
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
@@ -774,9 +788,9 @@ export class DeployService {
         await fs.promises.writeFile(path.join(releaseDir, '.env'), project.envVars);
         this.log(key, '✓ Project .env written to repo root', deploy.id);
       }
-      if (svc.envVars) {
+      if (svc.envVars && svc.appDir) {
         await fs.promises.writeFile(path.join(svcDir, '.env'), svc.envVars);
-        this.log(key, `✓ [${svc.name}] .env → ${svc.appDir || '.'}/`, deploy.id);
+        this.log(key, `✓ [${svc.name}] .env → ${svc.appDir}/`, deploy.id);
       }
 
       // Install at the root — picks up the new package's dependencies.
@@ -821,6 +835,13 @@ export class DeployService {
       this.setPhase(key, 'starting');
       await this.startService(project.name, svc, currentLink, pm, projectEnv, opts.generateSSL);
       await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', currentPath: releaseDir } });
+
+      // Recompute the project's overall status from its apps now that this service is
+      // marked 'running' — an incremental deploy that fixes the last broken service
+      // should clear a stale 'error' left over from a failed full deploy.
+      const projectApps = await this.prisma.app.findMany({ where: { projectId: project.id } });
+      const projectStatus = projectApps.some((a) => a.status === 'error') ? 'error' : 'running';
+      await this.prisma.project.update({ where: { id: project.id }, data: { status: projectStatus } });
 
       await this.persistLogs(deploy.id);
       await this.prisma.deploy.update({ where: { id: deploy.id }, data: { status: 'success' } });
