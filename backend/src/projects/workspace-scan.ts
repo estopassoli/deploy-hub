@@ -69,3 +69,19 @@ export function scanWorkspaceApps(rootDir: string): DetectedService[] {
   }
   return services;
 }
+
+/** Normalize an appDir for comparison: strip a leading "./" and any trailing slashes. */
+function normalizeAppDir(appDir: string): string {
+  return appDir.trim().replace(/^\.\/+/, '').replace(/\/+$/, '');
+}
+
+/** Drop the detected services whose appDir is already a service of the project. */
+export function filterAvailableServices(
+  detected: DetectedService[],
+  existingAppDirs: string[],
+): DetectedService[] {
+  const taken = new Set(
+    existingAppDirs.map(normalizeAppDir).filter((d) => d.length > 0),
+  );
+  return detected.filter((s) => !taken.has(normalizeAppDir(s.appDir)));
+}
