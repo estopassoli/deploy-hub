@@ -35,6 +35,10 @@ class UpdateProjectDto {
   @IsOptional() @IsString() branch?: string;
 }
 
+class AddServiceDto extends ServiceDto {
+  @IsOptional() @IsBoolean() @Transform(({ value }) => value === true || value === 'true') generateSSL?: boolean;
+}
+
 @Controller('projects')
 @UseGuards(JwtAuthGuard)
 export class ProjectsController {
@@ -68,6 +72,21 @@ export class ProjectsController {
   @Get(':id/available-services')
   availableServices(@Param('id') id: string, @Query('source') source?: string) {
     return this.projects.availableServices(id, source === 'repo' ? 'repo' : 'release');
+  }
+
+  @Post(':id/services')
+  addService(@Param('id') id: string, @Body() dto: AddServiceDto) {
+    return this.projects.addService(id, dto);
+  }
+
+  @Post(':id/services/:appId/deploy')
+  redeployService(@Param('id') id: string, @Param('appId') appId: string) {
+    return this.projects.redeployService(id, appId);
+  }
+
+  @Delete(':id/services/:appId')
+  removeService(@Param('id') id: string, @Param('appId') appId: string) {
+    return this.projects.removeService(id, appId);
   }
 
   @Post(':id/redeploy')

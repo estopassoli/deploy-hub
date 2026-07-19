@@ -152,6 +152,75 @@ export class ProjectsService {
     return { success: true };
   }
 
+  /** Add one monorepo app as a service of a live project, then deploy just it. */
+  async addService(id: string, dto: ServiceInput & { generateSSL?: boolean }) {
+    const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+
+    if (await this.prisma.app.findUnique({ where: { name: dto.name } })) {
+      throw new ConflictException(`Nome ${dto.name} já está em uso`);
+    }
+    const portTaken = await this.prisma.app.findFirst({ where: { port: dto.port } });
+    if (portTaken) throw new ConflictException(`Porta ${dto.port} em uso por ${portTaken.name}`);
+    if (project.apps.some((a) => a.appDir === dto.appDir)) {
+      throw new ConflictException(`${dto.appDir} já é um service deste projeto`);
+    }
+
+    const app = await this.prisma.app.create({
+      data: {
+        name: dto.name,
+        type: dto.type,
+        port: dto.port,
+        domain: dto.domain || null,
+        repository: project.repository,
+        branch: project.branch,
+        appDir: dto.appDir,
+        workspacePackage: dto.workspacePackage || null,
+        envVars: dto.envVars || null,
+        migrateCommand: dto.migrateCommand || null,
+        startCommand: dto.startCommand || null,
+        webhookSecret: crypto.randomBytes(16).toString('hex'),
+        projectId: project.id,
+      },
+    });
+
+    // Fire-and-forget: logs stream over WebSocket keyed by project name.
+    this.deployService
+      .deployProjectService(project.id, app.id, { generateSSL: dto.generateSSL })
+      .catch((e) => console.error('[deployProjectService]', e?.message));
+    return app;
+  }
+
+  /** Re-apply one existing service (new env/domain) without touching the others. */
+  async redeployService(id: string, appId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    if (!project.apps.some((a) => a.id === appId)) throw new NotFoundException('Service não encontrado neste projeto');
+    this.deployService.deployProjectService(id, appId, {}).catch((e) => console.error('[deployProjectService]', e?.message));
+    return { success: true };
+  }
+
+  /** Remove a single service: PM2 process, nginx vhost, static dir, PM2 config, DB row. */
+  async removeService(id: string, appId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    const svc = project.apps.find((a) => a.id === appId);
+    if (!svc) throw new NotFoundException('Service não encontrado neste projeto');
+    if (project.apps.length === 1) {
+      throw new BadRequestException('Este é o último service do projeto — exclua o projeto inteiro.');
+    }
+
+    await execAsync(`pm2 delete ${svc.name}`).catch(() => undefined);
+    await execAsync(`sudo rm -f /etc/nginx/sites-available/${svc.name}.conf /etc/nginx/sites-enabled/${svc.name}.conf`).catch(() => undefined);
+    await execAsync(`sudo rm -rf /var/www/${svc.name}`).catch(() => undefined);
+    await execAsync(`rm -f ${path.join(APPS_DIR, project.name, `${svc.name}.ecosystem.config.js`)}`).catch(() => undefined);
+    await execAsync('pm2 save').catch(() => undefined);
+    await execAsync('sudo systemctl reload nginx').catch(() => undefined);
+    // Deploy and AppMetric rows cascade on App delete (onDelete: Cascade in schema.prisma).
+    await this.prisma.app.delete({ where: { id: appId } });
+    return { success: true };
+  }
+
   async rollback(id: string, deployId: string) {
     return this.deployService.rollbackProject(id, deployId);
   }
