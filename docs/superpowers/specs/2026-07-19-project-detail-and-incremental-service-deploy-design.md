@@ -123,7 +123,7 @@ Métodos novos em `src/lib/api.ts`: `getProject`, `updateProject`, `getAvailable
 O card de projeto usa `@/components/ui/collapsible` (Radix, já no repo). Escolhido em vez de `accordion.tsx` porque cada projeto abre e fecha de forma independente.
 
 - Aberto por padrão.
-- Estado persistido em `localStorage`, chave `deployhub:project-collapsed:<projectId>`.
+- Estado persistido em `localStorage` como um único mapa `projectId -> boolean` na chave `deployhub:projects-collapsed`. Uma chave por projeto exigiria um efeito para reler o storage quando a lista de projetos muda; o mapa único é lido uma vez na inicialização do state e reescrito a cada toggle.
 - Recolhido, o header mostra `branch · packageManager · N services · N running · N erro`. Os botões de ação continuam no header, acessíveis nos dois estados.
 - Chevron indica o estado e o header inteiro é o gatilho, exceto a área dos botões.
 
