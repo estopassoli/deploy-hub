@@ -207,3 +207,66 @@ export function parseStartPort(scripts: { start?: string; dev?: string }): numbe
   }
   return null;
 }
+
+/**
+ * Existing `node_modules/.bin` dirs from `cwd` upwards, innermost first,
+ * stopping at `boundary` when given.
+ *
+ * In a workspace the binary lives in the repo root's node_modules, not the
+ * app's, so looking only at the cwd is not enough.
+ */
+export function localBinDirs(cwd: string, boundary?: string): string[] {
+  const limit = boundary ? path.resolve(boundary) : null;
+  const dirs: string[] = [];
+  let dir = path.resolve(cwd);
+
+  while (true) {
+    const bin = path.join(dir, 'node_modules', '.bin');
+    if (fs.existsSync(bin)) dirs.push(bin);
+
+    if (limit && dir === limit) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  return dirs;
+}
+
+/**
+ * `basePath` with the release's local bins in front.
+ *
+ * Deploy steps run through a shell and inherit the server's PATH, and a deploy
+ * box usually has next, tsc, vite and eslint installed globally. Without this,
+ * a bare `next build` picks the global binary — and a newer global Next run
+ * against the version the project installed fails looking for an internal file
+ * that only exists in its own release.
+ */
+export function hardenedPath(cwd: string, basePath: string, boundary?: string): string {
+  return [...localBinDirs(cwd, boundary), basePath].filter(Boolean).join(path.delimiter);
+}
+
+/**
+ * Path to a package binary, relative to the process cwd.
+ *
+ * Kept relative so it still goes through the `current` symlink, which is what
+ * lets a redeploy swap releases without rewriting the PM2 config.
+ */
+export function resolveBin(name: string, appCwd: string, boundary: string): string {
+  const fallback = path.join('node_modules', '.bin', name);
+  const limit = path.resolve(boundary);
+  const from = path.resolve(appCwd);
+  let dir = from;
+
+  while (true) {
+    const candidate = path.join(dir, 'node_modules', '.bin', name);
+    if (fs.existsSync(candidate)) return path.relative(from, candidate) || fallback;
+
+    if (dir === limit) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  return fallback;
+}
