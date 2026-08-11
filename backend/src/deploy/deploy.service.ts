@@ -18,6 +18,7 @@ import {
   turboBuildCmd,
   turboBuildManyCmd,
   binResolverPrelude,
+  hardenedPath,
 } from './package-manager';
 import type { PmInfo } from './package-manager';
 import { proxyVhostConfig, staticVhostConfig } from './nginx-config';
