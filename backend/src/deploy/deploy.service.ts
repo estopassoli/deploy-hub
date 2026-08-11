@@ -1002,7 +1002,16 @@ export class DeployService {
       NODE_ENV: 'production',
       PORT: app.port,
     };
-    const mergedEnv = { ...baseEnv, ...envVars };
+    const mergedEnv: Record<string, any> = { ...baseEnv, ...envVars };
+
+    // Same PATH hardening the build steps get, but for the long-running process.
+    //
+    // PM2 does not go through runCommand: it starts from this file's `env`, so
+    // without this a start command like `pnpm exec next start` resolves `next`
+    // through the server's PATH and boots the global Next against a build made
+    // by the version the project installed. Paths go through the `current`
+    // symlink so they survive a redeploy.
+    mergedEnv.PATH = hardenedPath(appCwd, envVars?.PATH || process.env.PATH || '', currentPath);
 
     // Convert env object to JS object string
     const envString = Object.entries(mergedEnv)
