@@ -32,6 +32,9 @@ interface ConfigForm {
   startCommand: string;
   appDir: string;
   workspacePackage: string;
+  runtime: string;
+  containerPort: string;
+  dockerContext: string;
 }
 
 const defaultForm: ConfigForm = {
@@ -42,6 +45,9 @@ const defaultForm: ConfigForm = {
   startCommand: '',
   appDir: '',
   workspacePackage: '',
+  runtime: 'auto',
+  containerPort: '',
+  dockerContext: '',
 };
 
 export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: AppConfigModalProps) {
@@ -49,6 +55,8 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
   const [isSaving, setIsSaving] = useState(false);
   const [originalForm, setOriginalForm] = useState<ConfigForm>(defaultForm);
   const [form, setForm] = useState<ConfigForm>(defaultForm);
+  // What the last deploy actually started the app under — informational, not editable.
+  const [activeRuntime, setActiveRuntime] = useState<string | null>(null);
 
   // Track which fields have been modified
   const modifiedFields = useMemo(() => {
@@ -60,6 +68,9 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
       startCommand: form.startCommand !== originalForm.startCommand,
       appDir: form.appDir !== originalForm.appDir,
       workspacePackage: form.workspacePackage !== originalForm.workspacePackage,
+      runtime: form.runtime !== originalForm.runtime,
+      containerPort: form.containerPort !== originalForm.containerPort,
+      dockerContext: form.dockerContext !== originalForm.dockerContext,
     };
     return modified;
   }, [form, originalForm]);
@@ -89,8 +100,12 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
         startCommand: app.startCommand ?? '',
         appDir: app.appDir ?? '',
         workspacePackage: app.workspacePackage ?? '',
+        runtime: app.runtime ?? 'auto',
+        containerPort: app.containerPort != null ? String(app.containerPort) : '',
+        dockerContext: app.dockerContext ?? '',
       };
-      
+
+      setActiveRuntime(app.activeRuntime ?? null);
       setOriginalForm(loadedForm);
       setForm(loadedForm);
     } catch (error: any) {
@@ -112,6 +127,9 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
       startCommand: form.startCommand,
       appDir: form.appDir,
       workspacePackage: form.workspacePackage,
+      runtime: form.runtime,
+      containerPort: form.containerPort,
+      dockerContext: form.dockerContext,
     };
 
     console.log('[AppConfigModal] Saving config:', {
@@ -311,6 +329,75 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
                   value={form.workspacePackage}
                   onChange={(e) => updateField('workspacePackage', e.target.value)}
                 />
+              </div>
+            </div>
+
+            {/* Runtime */}
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="cfgRuntime" className="text-sm font-medium flex items-center gap-2">
+                  Runtime
+                  {modifiedFields.runtime && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">modificado</span>
+                  )}
+                </Label>
+                {activeRuntime && (
+                  <span className="text-[10px] text-muted-foreground">
+                    rodando agora em <span className="font-mono text-foreground">{activeRuntime}</span>
+                  </span>
+                )}
+              </div>
+              <select
+                id="cfgRuntime"
+                className={cn(
+                  'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm',
+                  modifiedFields.runtime && 'ring-2 ring-primary/50 border-primary bg-primary/5',
+                )}
+                value={form.runtime}
+                onChange={(e) => updateField('runtime', e.target.value)}
+              >
+                <option value="auto">auto — usa Docker se houver Dockerfile/compose</option>
+                <option value="pm2">pm2 — sempre processo Node (ignora Docker)</option>
+                <option value="docker">docker — sempre container (falha se não houver Dockerfile/compose)</option>
+              </select>
+              <p className="text-[10px] sm:text-xs text-muted-foreground">
+                Em Docker o install, o build e o prisma generate acontecem dentro da imagem — os
+                comandos acima não são usados. Migrations só rodam se você preencher o Migrate command,
+                que é executado num container descartável a partir da imagem recém-construída.
+              </p>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="cfgContainerPort" className="text-sm flex items-center gap-2">
+                    Porta interna do container
+                    {modifiedFields.containerPort && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">modificado</span>
+                    )}
+                  </Label>
+                  <Input
+                    id="cfgContainerPort"
+                    placeholder="EXPOSE do Dockerfile, senão a porta do app"
+                    className={getFieldClassName('containerPort')}
+                    value={form.containerPort}
+                    onChange={(e) => updateField('containerPort', e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="cfgDockerContext" className="text-sm flex items-center gap-2">
+                    Build context
+                    {modifiedFields.dockerContext && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">modificado</span>
+                    )}
+                  </Label>
+                  <Input
+                    id="cfgDockerContext"
+                    placeholder="raiz do repositório"
+                    className={getFieldClassName('dockerContext')}
+                    value={form.dockerContext}
+                    onChange={(e) => updateField('dockerContext', e.target.value)}
+                  />
+                </div>
               </div>
             </div>
           </div>

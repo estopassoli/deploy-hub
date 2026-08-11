@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createRequire } from 'node:module';
 import {
   detectPackageManager,
   installCmd,
@@ -14,6 +15,7 @@ import {
   parseStartPort,
   detectAppType,
   readPackageName,
+  binResolverPrelude,
   type PmInfo,
 } from './package-manager.ts';
 
@@ -164,6 +166,75 @@ test('parseWorkspaceGlobs from package.json object', () => {
 });
 test('parseWorkspaceGlobs empty when none', () => {
   assert.deepEqual(parseWorkspaceGlobs(null, {}), []);
+});
+
+// --- binResolverPrelude ---
+/** Evaluate a generated prelude the way PM2 evaluates an ecosystem file: as CommonJS. */
+function evalPrelude(prelude: string, varName: string): unknown {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prelude-'));
+  const file = path.join(dir, 'ecosystem.config.js');
+  fs.writeFileSync(file, `${prelude}\nmodule.exports = ${varName};\n`);
+  return createRequire(file)(file);
+}
+
+test('binResolverPrelude resolves the release copy, not a different one earlier in PATH', () => {
+  // Two copies of the same package. Resolution must land on the one installed inside
+  // the release, which is the whole point of not going through PATH.
+  const release = tmp({
+    'node_modules/next/package.json': JSON.stringify({ name: 'next', version: '15.5.21', bin: { next: 'dist/bin/next' } }),
+    'node_modules/next/dist/bin/next': '#!/usr/bin/env node\n',
+  });
+  tmp({
+    'node_modules/next/package.json': JSON.stringify({ name: 'next', version: '16.2.12', bin: { next: 'dist/bin/next' } }),
+  });
+  const resolved = evalPrelude(
+    binResolverPrelude({ varName: 'nextBin', pkg: 'next', bin: 'next', resolveFrom: release }),
+    'nextBin',
+  );
+  assert.equal(resolved, path.join(release, 'node_modules/next/dist/bin/next'));
+});
+
+test('binResolverPrelude walks up to a hoisted node_modules', () => {
+  // pnpm with node-linker=hoisted leaves apps/web/node_modules without the framework;
+  // the copy lives at the repo root and normal resolution has to walk up to it.
+  const root = tmp({
+    'node_modules/next/package.json': JSON.stringify({ name: 'next', bin: { next: 'dist/bin/next' } }),
+    'apps/web/package.json': JSON.stringify({ name: '@app/web' }),
+  });
+  const resolved = evalPrelude(
+    binResolverPrelude({ varName: 'nextBin', pkg: 'next', bin: 'next', resolveFrom: path.join(root, 'apps/web') }),
+    'nextBin',
+  );
+  assert.equal(resolved, path.join(root, 'node_modules/next/dist/bin/next'));
+});
+
+test('binResolverPrelude accepts a string bin field', () => {
+  const release = tmp({
+    'node_modules/thing/package.json': JSON.stringify({ name: 'thing', bin: './cli.js' }),
+  });
+  const resolved = evalPrelude(
+    binResolverPrelude({ varName: 'b', pkg: 'thing', bin: 'thing', resolveFrom: release }),
+    'b',
+  );
+  assert.equal(resolved, path.join(release, 'node_modules/thing/cli.js'));
+});
+
+test('binResolverPrelude throws loudly when the package is absent', () => {
+  const empty = tmp({ 'package.json': '{}' });
+  assert.throws(
+    () => evalPrelude(binResolverPrelude({ varName: 'nextBin', pkg: 'next', bin: 'next', resolveFrom: empty }), 'nextBin'),
+    /Cannot find module/,
+  );
+});
+
+test('binResolverPrelude throws when the package exposes no such executable', () => {
+  const release = tmp({
+    'node_modules/next/package.json': JSON.stringify({ name: 'next' }),
+  });
+  assert.throws(
+    () => evalPrelude(binResolverPrelude({ varName: 'nextBin', pkg: 'next', bin: 'next', resolveFrom: release }), 'nextBin'),
+    /não expõe o executável/,
+  );
 });
 
 // --- parseStartPort ---

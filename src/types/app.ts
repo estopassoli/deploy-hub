@@ -1,6 +1,11 @@
 export type AppType = 'nextjs' | 'nestjs' | 'vitejs';
 export type AppStatus = 'running' | 'stopped' | 'error' | 'deploying';
 
+/** What the user asked for. `auto` lets a Dockerfile/compose in the app dir decide. */
+export type RuntimePref = 'auto' | 'pm2' | 'docker';
+/** What actually supervises the app right now — set by the deploy, read-only in the UI. */
+export type RuntimeKind = 'pm2' | 'docker' | 'static';
+
 export interface AppVersion {
   id: string;
   timestamp: string;
@@ -28,6 +33,10 @@ export interface App {
   cpu?: number;
   memory?: number;
   webhookSecret?: string;
+  runtime?: RuntimePref;
+  activeRuntime?: RuntimeKind | null;
+  containerPort?: number | null;
+  dockerContext?: string | null;
 }
 
 export interface DeployConfig {

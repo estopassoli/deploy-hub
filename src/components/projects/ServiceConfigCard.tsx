@@ -30,6 +30,10 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
   const [envVars, setEnvVars] = useState(app.envVars || '');
   const [startCommand, setStartCommand] = useState(app.startCommand || '');
   const [migrateCommand, setMigrateCommand] = useState(app.migrateCommand || '');
+  const [runtime, setRuntime] = useState(app.runtime || 'auto');
+  const [containerPort, setContainerPort] = useState(
+    app.containerPort != null ? String(app.containerPort) : '',
+  );
   const [saving, setSaving] = useState(false);
   const [deploying, setDeploying] = useState(false);
 
@@ -43,6 +47,8 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
         envVars,
         startCommand,
         migrateCommand,
+        runtime,
+        containerPort,
       });
       toast.success(`${app.name} salvo — use "Deploy service" para aplicar`);
       onChanged();
@@ -87,6 +93,7 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
           <span className="font-semibold text-foreground">{app.name}</span>
           <span className="font-mono text-xs text-muted-foreground">
             {app.workspacePackage || app.appDir} · {app.type} · :{app.port}
+            {app.activeRuntime && app.activeRuntime !== 'pm2' ? ` · ${app.activeRuntime}` : ''}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -114,7 +121,8 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
               <AlertDialogHeader>
                 <AlertDialogTitle>Remover {app.name}?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Para o processo PM2, remove o vhost do Nginx e os arquivos em /var/www/{app.name}, e apaga o registro.
+                  Para o processo PM2 e remove os containers e imagens do service, remove o vhost do
+                  Nginx e os arquivos em /var/www/{app.name}, e apaga o registro.
                   Os outros services do projeto não são afetados. Esta ação é irreversível.
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -147,6 +155,37 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
         <Label className="text-xs">Migrate command (opcional)</Label>
         <Input value={migrateCommand} onChange={(e) => setMigrateCommand(e.target.value)} className="font-mono text-sm" placeholder="pnpm prisma migrate deploy" />
       </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label className="text-xs">Runtime</Label>
+          <select
+            value={runtime}
+            onChange={(e) => setRuntime(e.target.value)}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            <option value="auto">auto — Docker se houver Dockerfile/compose</option>
+            <option value="pm2">pm2 — sempre processo Node</option>
+            <option value="docker">docker — sempre container</option>
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Porta interna do container (opcional)</Label>
+          <Input
+            value={containerPort}
+            onChange={(e) => setContainerPort(e.target.value)}
+            className="font-mono text-sm"
+            placeholder={`EXPOSE do Dockerfile, senão ${app.port}`}
+          />
+        </div>
+      </div>
+      {runtime === 'docker' || (runtime === 'auto' && app.activeRuntime === 'docker') ? (
+        <p className="text-[10px] text-muted-foreground">
+          Em Docker, o install e o build acontecem dentro da imagem — o Start command acima é
+          ignorado (quem manda é o CMD do Dockerfile). O Migrate command roda num container
+          descartável a partir da imagem nova, antes do app subir.
+        </p>
+      ) : null}
 
       <div className="space-y-1">
         <Label className="text-xs">Env do service (vira {app.appDir || '.'}/.env)</Label>

@@ -17,9 +17,33 @@ import {
   execCmd,
   turboBuildCmd,
   turboBuildManyCmd,
+  binResolverPrelude,
 } from './package-manager';
 import type { PmInfo } from './package-manager';
 import { proxyVhostConfig, staticVhostConfig } from './nginx-config';
+import {
+  detectDockerAssets,
+  resolveRuntime,
+  imageTag,
+  imageName,
+  containerName,
+  composeProject,
+  parseExposedPort,
+  buildImageCmd,
+  runContainerCmd,
+  runOnceCmd,
+  composeUpCmd,
+  composeDownCmd,
+  renderEnvFile,
+  composeBin,
+  diagnoseCompose,
+  dockerAvailable,
+  inspectContainer,
+  removeContainer,
+  removeApp,
+  restartApp,
+} from './docker';
+import type { DockerAssets, RuntimeKind } from './docker';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -348,18 +372,29 @@ export class DeployService {
         }
       }
 
+      // Under Docker the image build does its own install, build and (usually) prisma
+      // generate, from the base image's toolchain. Repeating those on the host would
+      // double the deploy time and can fail outright — the host node/pnpm version has
+      // nothing to do with the one in the Dockerfile.
+      const { kind: runtimeKind, assets: dockerAssets } = this.resolveAppRuntime(
+        app, appWorkDir, releaseDir, app.name, deploy.id,
+      );
+      const buildsOnHost = runtimeKind !== 'docker';
+
       // Install dependencies with auto-recovery (pass env vars)
-      this.setPhase(app.name, 'installing');
-      this.log(app.name, '▶ Installing dependencies...', deploy.id);
-      await this.installDependencies(releaseDir, app.name, pm, options.installCommand, deploy.id, envVarsObj);
-      this.log(app.name, '✓ Dependencies installed', deploy.id);
+      if (buildsOnHost) {
+        this.setPhase(app.name, 'installing');
+        this.log(app.name, '▶ Installing dependencies...', deploy.id);
+        await this.installDependencies(releaseDir, app.name, pm, options.installCommand, deploy.id, envVarsObj);
+        this.log(app.name, '✓ Dependencies installed', deploy.id);
+      }
 
       // Prisma — detect schema at the app dir (monorepo) or repo root; scope commands to the workspace package.
       const scopePkg = isMonorepo ? pkg : undefined;
       const hasPrisma =
         fs.existsSync(path.join(appWorkDir, 'prisma', 'schema.prisma')) ||
         fs.existsSync(path.join(releaseDir, 'prisma', 'schema.prisma'));
-      if (hasPrisma || options.migrateCommand) {
+      if (buildsOnHost && (hasPrisma || options.migrateCommand)) {
         this.setPhase(app.name, 'migrating');
         if (hasPrisma) {
           const genCmd = execCmd(pm, { pkg: scopePkg, argv: ['prisma', 'generate'] });
@@ -383,32 +418,49 @@ export class DeployService {
       }
 
       // Build — custom command wins; else generate per package manager / monorepo / framework.
-      this.setPhase(app.name, 'building');
-      let buildCmd = options.buildCommand?.trim();
-      if (!buildCmd) {
-        const hasTurbo = fs.existsSync(path.join(releaseDir, 'turbo.json'));
-        if (isMonorepo && pkg && hasTurbo) {
-          buildCmd = turboBuildCmd(pm, pkg);
-        } else if (isMonorepo && pkg) {
-          buildCmd = runScriptCmd(pm, { pkg, script: 'build' });
-        } else if (effectiveType === 'nestjs') {
-          buildCmd = execCmd(pm, { argv: ['nest', 'build'] });
-        } else {
-          buildCmd = runScriptCmd(pm, { script: 'build' });
+      if (buildsOnHost) {
+        this.setPhase(app.name, 'building');
+        let buildCmd = options.buildCommand?.trim();
+        if (!buildCmd) {
+          const hasTurbo = fs.existsSync(path.join(releaseDir, 'turbo.json'));
+          if (isMonorepo && pkg && hasTurbo) {
+            buildCmd = turboBuildCmd(pm, pkg);
+          } else if (isMonorepo && pkg) {
+            buildCmd = runScriptCmd(pm, { pkg, script: 'build' });
+          } else if (effectiveType === 'nestjs') {
+            buildCmd = execCmd(pm, { argv: ['nest', 'build'] });
+          } else {
+            buildCmd = runScriptCmd(pm, { script: 'build' });
+          }
         }
+        this.log(app.name, `▶ Building ${effectiveType} application...`, deploy.id);
+        await this.runCommand(buildCmd, releaseDir, app.name, deploy.id, envVarsObj);
+        this.log(app.name, '✓ Build completed', deploy.id);
       }
-      this.log(app.name, `▶ Building ${effectiveType} application...`, deploy.id);
-      await this.runCommand(buildCmd, releaseDir, app.name, deploy.id, envVarsObj);
-      this.log(app.name, '✓ Build completed', deploy.id);
 
       // Update symlink
       this.log(app.name, '▶ Updating symlink...', deploy.id);
       await execAsync(`rm -f ${currentLink} && ln -s ${releaseDir} ${currentLink}`);
       this.log(app.name, `✓ ${currentLink} → ${releaseDir}`, deploy.id);
 
-      // Start/restart PM2 (not for static) - include env vars in PM2 config
       this.setPhase(app.name, 'starting');
-      if (effectiveType !== 'vitejs') {
+      if (runtimeKind === 'docker') {
+        // Switching runtimes between deploys: kill the PM2 process before the container
+        // binds the same port.
+        await execAsync(`pm2 delete ${app.name}`).catch(() => undefined);
+        await this.runDockerRelease({
+          app,
+          key: app.name,
+          deployId: deploy.id,
+          ownerDir: path.join(APPS_DIR, app.name),
+          releaseDir,
+          workDir: appWorkDir,
+          version: timestamp,
+          env: envVarsObj,
+          assets: dockerAssets,
+        });
+      } else if (effectiveType !== 'vitejs') {
+        await this.stopDockerApp(app).catch(() => undefined);
         this.log(app.name, '▶ Starting PM2 process...', deploy.id);
         const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj, options.startCommand, {
           pm,
@@ -428,6 +480,7 @@ export class DeployService {
         this.log(app.name, `✓ PM2 process started on port ${app.port}`, deploy.id);
       } else {
         // For Vite.js static apps, copy dist to /var/www/{app_name}
+        await this.stopDockerApp(app).catch(() => undefined);
         this.log(app.name, '▶ Copying dist to /var/www...', deploy.id);
         const wwwDir = `/var/www/${app.name}`;
         await execAsync(`sudo mkdir -p ${wwwDir}`);
@@ -442,7 +495,7 @@ export class DeployService {
       // Update Nginx
       this.setPhase(app.name, 'configuring');
       this.log(app.name, '▶ Configuring Nginx...', deploy.id);
-      await this.updateNginxConfig(app);
+      await this.updateNginxConfig(app, runtimeKind);
       this.log(app.name, `✓ Nginx configured${app.domain ? ` for ${app.domain}` : ''}`, deploy.id);
 
       // Generate SSL certificate with Certbot if requested
@@ -484,7 +537,7 @@ export class DeployService {
 
       await this.prisma.app.update({
         where: { id: app.id },
-        data: { status: 'running', currentPath: releaseDir },
+        data: { status: 'running', currentPath: releaseDir, activeRuntime: runtimeKind },
       });
 
       // Log success to system logs
@@ -628,15 +681,30 @@ export class DeployService {
         }
       }
 
+      // Resolve every service's runtime up front. The shared host steps below exist to
+      // serve the PM2/static services; a dockerized one gets its install, build and
+      // prisma generate from its own image, so it must not drag the host through them.
+      // A project where every service is dockerized skips the root install entirely.
+      const runtimes = new Map<string, { kind: RuntimeKind; assets: DockerAssets }>();
+      for (const svc of services) {
+        const svcDir = svc.appDir ? path.join(releaseDir, svc.appDir) : releaseDir;
+        runtimes.set(svc.id, this.resolveAppRuntime(svc, svcDir, releaseDir, key, deploy.id));
+      }
+      const hostServices = services.filter((s) => runtimes.get(s.id)!.kind !== 'docker');
+
       // Install once at root
-      this.setPhase(key, 'installing');
-      this.log(key, '▶ Installing dependencies (root, once)...', deploy.id);
-      await this.installDependencies(releaseDir, key, pm, undefined, deploy.id, projectEnv);
-      this.log(key, '✓ Dependencies installed', deploy.id);
+      if (hostServices.length > 0) {
+        this.setPhase(key, 'installing');
+        this.log(key, '▶ Installing dependencies (root, once)...', deploy.id);
+        await this.installDependencies(releaseDir, key, pm, undefined, deploy.id, projectEnv);
+        this.log(key, '✓ Dependencies installed', deploy.id);
+      } else {
+        this.log(key, '  Todos os services rodam em Docker — install no host dispensado', deploy.id);
+      }
 
       // Prisma per service
       this.setPhase(key, 'migrating');
-      for (const svc of services) {
+      for (const svc of hostServices) {
         const svcDir = svc.appDir ? path.join(releaseDir, svc.appDir) : releaseDir;
         const hasPrisma = fs.existsSync(path.join(svcDir, 'prisma', 'schema.prisma'));
         if (!hasPrisma && !svc.migrateCommand) continue;
@@ -657,15 +725,16 @@ export class DeployService {
         }
       }
 
-      // Build once
+      // Build once — dockerized services build inside their image, so they stay out of
+      // the Turbo filter list.
       this.setPhase(key, 'building');
-      const pkgs = services.map((s) => s.workspacePackage).filter((p): p is string => Boolean(p));
+      const pkgs = hostServices.map((s) => s.workspacePackage).filter((p): p is string => Boolean(p));
       const hasTurbo = fs.existsSync(path.join(releaseDir, 'turbo.json'));
       if (hasTurbo && pkgs.length) {
         this.log(key, `▶ Building ${pkgs.length} services with Turbo...`, deploy.id);
         await this.runCommand(turboBuildManyCmd(pm, pkgs), releaseDir, key, deploy.id, projectEnv);
       } else {
-        for (const svc of services) {
+        for (const svc of hostServices) {
           if (!svc.workspacePackage) continue;
           this.log(key, `▶ [${svc.name}] Building...`, deploy.id);
           await this.runCommand(runScriptCmd(pm, { pkg: svc.workspacePackage, script: 'build' }), releaseDir, key, deploy.id, projectEnv);
@@ -682,7 +751,7 @@ export class DeployService {
       const failures: string[] = [];
       for (const svc of services) {
         try {
-          await this.startService(project.name, svc, currentLink, pm, projectEnv, opts.generateSSL);
+          await this.startService(project.name, svc, currentLink, pm, projectEnv, opts.generateSSL, runtimes.get(svc.id));
           await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', currentPath: releaseDir } });
         } catch (e) {
           failures.push(svc.name);
@@ -793,22 +862,32 @@ export class DeployService {
         this.log(key, `✓ [${svc.name}] .env → ${svc.appDir}/`, deploy.id);
       }
 
+      // Same rule as the full project deploy: a dockerized service does its install,
+      // build and prisma generate inside its own image, so none of the host steps below
+      // apply to it.
+      const runtime = this.resolveAppRuntime(svc, svcDir, releaseDir, key, deploy.id);
+      const buildsOnHost = runtime.kind !== 'docker';
+
       // Install at the root — picks up the new package's dependencies.
-      this.setPhase(key, 'installing');
-      this.log(key, '▶ Installing dependencies (root)...', deploy.id);
-      await this.installDependencies(releaseDir, key, pm, undefined, deploy.id, projectEnv);
-      this.log(key, '✓ Dependencies installed', deploy.id);
+      if (buildsOnHost) {
+        this.setPhase(key, 'installing');
+        this.log(key, '▶ Installing dependencies (root)...', deploy.id);
+        await this.installDependencies(releaseDir, key, pm, undefined, deploy.id, projectEnv);
+        this.log(key, '✓ Dependencies installed', deploy.id);
+      }
 
       // Prisma — only for this service.
       this.setPhase(key, 'migrating');
       const svcEnv = { ...projectEnv, ...this.parseEnvVars(svc.envVars || undefined) };
       const pkg = svc.workspacePackage || undefined;
-      const hasPrisma = fs.existsSync(path.join(svcDir, 'prisma', 'schema.prisma'));
+      const hasPrisma = buildsOnHost && fs.existsSync(path.join(svcDir, 'prisma', 'schema.prisma'));
       if (hasPrisma) {
         this.log(key, `▶ [${svc.name}] Prisma generate...`, deploy.id);
         await this.runCommand(execCmd(pm, { pkg, argv: ['prisma', 'generate'] }), releaseDir, key, deploy.id, svcEnv);
       }
-      const migrateCmd = svc.migrateCommand || (hasPrisma ? execCmd(pm, { pkg, argv: ['prisma', 'migrate', 'deploy'] }) : null);
+      const migrateCmd = buildsOnHost
+        ? svc.migrateCommand || (hasPrisma ? execCmd(pm, { pkg, argv: ['prisma', 'migrate', 'deploy'] }) : null)
+        : null;
       if (migrateCmd) {
         this.log(key, `▶ [${svc.name}] Migrations...`, deploy.id);
         try {
@@ -821,7 +900,7 @@ export class DeployService {
       // Build only this package. Turbo also rebuilds the workspace packages it depends on;
       // running processes are unaffected (modules already loaded, same commit).
       this.setPhase(key, 'building');
-      if (svc.workspacePackage) {
+      if (buildsOnHost && svc.workspacePackage) {
         const hasTurbo = fs.existsSync(path.join(releaseDir, 'turbo.json'));
         const buildCmd = hasTurbo
           ? turboBuildCmd(pm, svc.workspacePackage)
@@ -831,9 +910,9 @@ export class DeployService {
         this.log(key, '✓ Build completed', deploy.id);
       }
 
-      // Start only this service — PM2/static + nginx + optional certbot.
+      // Start only this service — PM2/docker/static + nginx + optional certbot.
       this.setPhase(key, 'starting');
-      await this.startService(project.name, svc, currentLink, pm, projectEnv, opts.generateSSL);
+      await this.startService(project.name, svc, currentLink, pm, projectEnv, opts.generateSSL, runtime);
       await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', currentPath: releaseDir } });
 
       // Recompute the project's overall status from its apps now that this service is
@@ -859,6 +938,185 @@ export class DeployService {
     }
   }
 
+  /**
+   * Resolve the runtime for one app/service and log the reasoning.
+   *
+   * Static Vite apps keep their own path (nginx serving /var/www) unless the repo
+   * actually ships Docker files for them — `fallback` carries that distinction.
+   */
+  private resolveAppRuntime(
+    app: any,
+    workDir: string,
+    releaseDir: string,
+    key: string,
+    deployId?: string,
+  ): { kind: RuntimeKind; assets: DockerAssets } {
+    const assets = detectDockerAssets(workDir, releaseDir);
+    const fallback: RuntimeKind = (app.type === 'vitejs' ? 'static' : 'pm2');
+    const kind = resolveRuntime(app.runtime, assets, fallback);
+    if (kind === 'docker') {
+      const via = assets.composeFile ? `compose (${path.basename(assets.composeFile)})` : 'Dockerfile';
+      this.log(key, `  Runtime: docker — ${via}`, deployId);
+    } else {
+      this.log(key, `  Runtime: ${kind}${app.runtime === 'pm2' && (assets.composeFile || assets.dockerfile) ? ' (Docker presente, mas fixado em pm2 no painel)' : ''}`, deployId);
+    }
+    return { kind, assets };
+  }
+
+  /**
+   * Write the env file that `docker run --env-file` / compose read.
+   *
+   * It lives next to the app's PM2 config under APPS_DIR rather than inside the
+   * release, so it survives rollbacks and is not served by accident from a web root.
+   * Mode 0600 because it holds every secret the app has.
+   */
+  private async writeDockerEnvFile(
+    ownerDir: string,
+    appName: string,
+    env: Record<string, string | number>,
+  ): Promise<string> {
+    await fs.promises.mkdir(ownerDir, { recursive: true });
+    const envPath = path.join(ownerDir, `${appName}.env`);
+    await fs.promises.writeFile(envPath, renderEnvFile(env), { mode: 0o600 });
+    await fs.promises.chmod(envPath, 0o600);
+    return envPath;
+  }
+
+  /**
+   * Build and start one release under Docker.
+   *
+   * Compose owns its own ports and sidecars, so for a compose service we only bring
+   * the project up. For a Dockerfile we build a tagged image per release and run a
+   * single container publishing the panel's port.
+   */
+  private async runDockerRelease(o: {
+    app: any;
+    key: string;
+    deployId?: string;
+    ownerDir: string;
+    releaseDir: string;
+    workDir: string;
+    version: string;
+    env: Record<string, string>;
+    assets: DockerAssets;
+  }): Promise<void> {
+    const { app, key, deployId, releaseDir, workDir, version, assets } = o;
+
+    if (!(await dockerAvailable())) {
+      throw new Error('Docker não está disponível (o daemon respondeu com erro a `docker info`).');
+    }
+
+    // PORT is injected the same way PM2 does it, so an image that honours $PORT lands
+    // on the port the vhost proxies without any extra configuration.
+    const containerPort =
+      app.containerPort ||
+      (assets.dockerfile ? parseExposedPort(await fs.promises.readFile(assets.dockerfile, 'utf-8').catch(() => '')) : null) ||
+      app.port;
+    const env = { NODE_ENV: 'production', PORT: containerPort, ...o.env };
+    const envPath = await this.writeDockerEnvFile(o.ownerDir, app.name, env);
+    this.log(key, `  Env file: ${envPath} (${Object.keys(env).length} vars)`, deployId);
+
+    if (assets.composeFile) {
+      const bin = await composeBin();
+      if (!bin) {
+        throw new Error(
+          'Compose encontrado, mas nem `docker compose` nem `docker-compose` existem neste host.',
+        );
+      }
+      // Validate before touching anything: this catches both an invalid compose file and
+      // a confined snap that cannot read the release directory, and reports each as
+      // itself instead of as a half-applied deploy.
+      const problem = await diagnoseCompose(bin, assets.composeFile);
+      if (problem) throw new Error(problem);
+
+      const project = composeProject(app.name);
+      this.log(key, `▶ [${app.name}] compose up (${bin}, projeto ${project})...`, deployId);
+      // cwd is the compose file's directory: compose resolves relative build contexts,
+      // volumes and its own .env from there.
+      await this.runCommand(
+        composeUpCmd(bin, { project, file: assets.composeFile }),
+        path.dirname(assets.composeFile),
+        key,
+        deployId,
+        env as Record<string, string>,
+      );
+      this.log(key, `✓ [${app.name}] compose up`, deployId);
+      return;
+    }
+
+    if (!assets.dockerfile) {
+      throw new Error('Runtime docker sem Dockerfile nem compose — nada para construir.');
+    }
+
+    const context = app.dockerContext
+      ? path.resolve(releaseDir, app.dockerContext)
+      : releaseDir;
+    const tag = imageTag(app.name, version);
+    this.log(key, `▶ [${app.name}] docker build (context ${context})...`, deployId);
+    await this.runCommand(
+      buildImageCmd({ tag, dockerfile: assets.dockerfile, context, alsoTag: `${imageName(app.name)}:current` }),
+      releaseDir,
+      key,
+      deployId,
+      env as Record<string, string>,
+    );
+    this.log(key, `✓ [${app.name}] imagem ${tag}`, deployId);
+
+    // Migrations run in a throwaway container off the image we just built, so they use
+    // the same toolchain and dependencies the app will run with. Only an explicit
+    // migrate command is honoured: guessing a Prisma invocation for an arbitrary image
+    // (which package manager? is the CLI even installed?) fails more often than it works.
+    if (app.migrateCommand) {
+      this.log(key, `▶ [${app.name}] migrations no container...`, deployId);
+      await this.runCommand(
+        runOnceCmd({ image: tag, command: app.migrateCommand, envFile: envPath }),
+        releaseDir,
+        key,
+        deployId,
+      );
+      this.log(key, `✓ [${app.name}] migrations aplicadas`, deployId);
+    } else if (fs.existsSync(path.join(workDir, 'prisma', 'schema.prisma'))) {
+      this.log(
+        key,
+        `  ⚠ [${app.name}] schema.prisma encontrado, mas sem "Migrate command" — nenhuma migration foi rodada.`,
+        deployId,
+      );
+    }
+
+    const name = containerName(app.name);
+    const existing = await inspectContainer(name);
+    if (existing && existing.owner !== app.name) {
+      throw new Error(
+        `Já existe um container chamado "${name}" que não foi criado pelo DeployHub. Renomeie ou remova antes de deployar.`,
+      );
+    }
+    if (existing) {
+      this.log(key, `  Removendo container anterior`, deployId);
+      await removeContainer(name);
+    }
+
+    this.log(key, `▶ [${app.name}] docker run → 127.0.0.1:${app.port} → :${containerPort}`, deployId);
+    await this.runCommand(
+      runContainerCmd({ name, image: tag, hostPort: app.port, containerPort, envFile: envPath }),
+      releaseDir,
+      key,
+      deployId,
+    );
+    this.log(key, `✓ [${app.name}] container no ar`, deployId);
+  }
+
+  /**
+   * Drop any container an app left behind.
+   *
+   * Called when a deploy resolves to PM2 or static: an app can move between runtimes
+   * between deploys, and a leftover container would keep the published port bound,
+   * making the new process fail to bind — or worse, keep answering nginx with the old
+   * release while the deploy reports success.
+   */
+  private async stopDockerApp(app: { name: string }): Promise<void> {
+    await removeApp(app.name);
+  }
+
   private async startService(
     projectName: string,
     svc: any,
@@ -866,12 +1124,31 @@ export class DeployService {
     pm: PmInfo,
     projectEnv: Record<string, string>,
     generateSSL?: boolean,
+    precomputed?: { kind: RuntimeKind; assets: DockerAssets },
   ) {
     const svcWorkDir = svc.appDir ? path.join(currentLink, svc.appDir) : currentLink;
     const effectiveType = detectAppType(svcWorkDir) || svc.type;
     const svcEnv = { ...projectEnv, ...this.parseEnvVars(svc.envVars || undefined) };
+    // The caller already resolved this in the project deploy — reuse it rather than
+    // re-detecting and logging the same decision twice.
+    const { kind, assets } = precomputed ?? this.resolveAppRuntime(svc, svcWorkDir, currentLink, projectName);
 
-    if (effectiveType !== 'vitejs') {
+    if (kind === 'docker') {
+      // A service can move between runtimes across deploys; tear the old supervisor
+      // down first so the two never fight over the port.
+      await execAsync(`pm2 delete ${svc.name}`).catch(() => undefined);
+      await this.runDockerRelease({
+        app: svc,
+        key: projectName,
+        ownerDir: path.join(APPS_DIR, projectName),
+        releaseDir: currentLink,
+        workDir: svcWorkDir,
+        version: path.basename(await fs.promises.realpath(currentLink)),
+        env: svcEnv,
+        assets,
+      });
+    } else if (effectiveType !== 'vitejs') {
+      await this.stopDockerApp(svc).catch(() => undefined);
       const cfg = this.generatePM2Config(svc, currentLink, svcEnv, svc.startCommand || undefined, {
         pm,
         pkg: svc.workspacePackage || undefined,
@@ -888,6 +1165,7 @@ export class DeployService {
       await execAsync('pm2 save');
       this.log(projectName, `✓ [${svc.name}] PM2 on port ${svc.port}`);
     } else {
+      await this.stopDockerApp(svc).catch(() => undefined);
       const wwwDir = `/var/www/${svc.name}`;
       await execAsync(`sudo mkdir -p ${wwwDir}`);
       await execAsync(`sudo rm -rf ${wwwDir}/*`);
@@ -898,7 +1176,11 @@ export class DeployService {
       this.log(projectName, `✓ [${svc.name}] static → ${wwwDir}`);
     }
 
-    await this.updateNginxConfig(svc);
+    // Record what ended up supervising the service, so status/logs/metrics query the
+    // right source without having to re-inspect the filesystem on every poll.
+    await this.prisma.app.update({ where: { id: svc.id }, data: { activeRuntime: kind } });
+
+    await this.updateNginxConfig(svc, kind);
     if (generateSSL && svc.domain) {
       try {
         await execAsync('which certbot');
@@ -917,8 +1199,24 @@ export class DeployService {
 
     const currentLink = path.join(APPS_DIR, project.name, 'current');
     await execAsync(`rm -f ${currentLink} && ln -s ${deploy.path} ${currentLink}`);
+    const projectEnv = this.parseEnvVars(project.envVars || undefined);
     for (const svc of project.apps) {
-      if (svc.type === 'vitejs') {
+      if (svc.activeRuntime === 'docker') {
+        // Moving the symlink does nothing for a container — its code came from the image,
+        // not the release directory. Rebuild and re-run from the older release instead;
+        // Docker's layer cache makes that nearly as cheap as a restart.
+        const svcDir = svc.appDir ? path.join(deploy.path, svc.appDir) : deploy.path;
+        await this.runDockerRelease({
+          app: svc,
+          key: project.name,
+          ownerDir: path.join(APPS_DIR, project.name),
+          releaseDir: deploy.path,
+          workDir: svcDir,
+          version: deploy.version,
+          env: { ...projectEnv, ...this.parseEnvVars(svc.envVars || undefined) },
+          assets: detectDockerAssets(svcDir, deploy.path),
+        }).catch((e) => this.log(project.name, `❌ [${svc.name}] rollback falhou: ${e.message}`));
+      } else if (svc.type === 'vitejs') {
         const wwwDir = `/var/www/${svc.name}`;
         const distDir = svc.appDir ? `${deploy.path}/${svc.appDir}/dist` : `${deploy.path}/dist`;
         await execAsync(`sudo rm -rf ${wwwDir}/* && sudo cp -r ${distDir}/* ${wwwDir}/`).catch(() => undefined);
@@ -998,114 +1296,87 @@ export class DeployService {
       })
       .join(',\n');
 
+    // The directory the process runs in: the package's own dir in a monorepo (that is
+    // where .next and dist live), the release root otherwise.
+    const appDir = (app.appDir || '').trim();
+    const workDir = appDir ? path.posix.join(currentPath, appDir) : currentPath;
+
+    const emit = (o: { prelude?: string; script: string; args: string; cwd: string; interpreter: string }) => `
+${o.prelude ? o.prelude + '\n' : ''}
+module.exports = {
+  apps: [{
+    name: '${app.name}',
+    cwd: ${o.cwd},
+    script: ${o.script},
+    args: '${o.args}',
+    interpreter: '${o.interpreter}',
+    exec_mode: 'fork',
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+${envString}
+    }
+  }]
+};
+`;
+
     // If custom start command is provided, use it
     if (customStartCommand) {
       // Parse the command - could be "npm run start:prod" or "node dist/main.js" etc.
       const parts = customStartCommand.split(' ');
-      const script = parts[0];
-      const args = parts.slice(1).join(' ');
-
-      return `
-module.exports = {
-  apps: [{
-    name: '${app.name}',
-    cwd: '${currentPath}',
-    script: '${script}',
-    args: '${args}',
-    interpreter: 'none',
-    instances: 1,
-    autorestart: true,
-    watch: false,
-    max_memory_restart: '1G',
-    env: {
-${envString}
-    }
-  }]
-};
-`;
+      return emit({
+        script: JSON.stringify(parts[0]),
+        args: parts.slice(1).join(' '),
+        cwd: JSON.stringify(currentPath),
+        interpreter: 'none',
+      });
     }
 
-    // Monorepo: run the start scoped to the workspace package (exec runs in the package dir; PORT is injected).
-    if (scope?.pkg) {
-      const startArgs =
-        effectiveType === 'nextjs'
-          ? execCmd(scope.pm, { pkg: scope.pkg, argv: ['next', 'start', '--port', String(app.port)] })
-          : runScriptCmd(scope.pm, { pkg: scope.pkg, script: 'start' });
-      const [script, ...rest] = startArgs.split(' ');
-      return `
-module.exports = {
-  apps: [{
-    name: '${app.name}',
-    cwd: '${currentPath}',
-    script: '${script}',
-    args: '${rest.join(' ')}',
-    interpreter: 'none',
-    instances: 1,
-    autorestart: true,
-    watch: false,
-    max_memory_restart: '1G',
-    env: {
-${envString}
-    }
-  }]
-};
-`;
-    }
-
-    // Para Next.js, usa comando direto para garantir que a porta configurada prevalece
-    // sobre qualquer --port hardcoded no package.json
+    // Next.js — run the `next` binary this release installed, resolved by module and
+    // not by PATH. See binResolverPrelude for what goes wrong otherwise. Running the
+    // binary directly (rather than `pnpm exec next`) also keeps the server as a direct
+    // child of PM2: a package-manager wrapper does not forward the stop signal, and the
+    // orphaned server would still hold the port when the next deploy tries to bind it.
     if (effectiveType === 'nextjs') {
-      return `
-module.exports = {
-  apps: [{
-    name: '${app.name}',
-    cwd: '${currentPath}',
-    script: 'node_modules/.bin/next',
-    args: 'start --port ${app.port}',
-    interpreter: 'none',
-    instances: 1,
-    autorestart: true,
-    watch: false,
-    max_memory_restart: '1G',
-    env: {
-${envString}
-    }
-  }]
-};
-`;
+      return emit({
+        prelude: binResolverPrelude({ varName: 'nextBin', pkg: 'next', bin: 'next', resolveFrom: workDir }),
+        script: 'nextBin',
+        args: `start --port ${app.port}`,
+        cwd: JSON.stringify(workDir),
+        interpreter: 'node',
+      });
     }
 
-    // Single-app NestJS/other: run the start script via the detected package manager.
-    const startCmd = runScriptCmd(scope?.pm || { name: 'npm', berry: false, viaCorepack: false }, { script: 'start' });
+    // NestJS/other: run the package's own start script through the detected package
+    // manager. Those scripts are `node dist/main.js` by convention — no PATH lookup of
+    // a build tool involved, so the hijack above does not apply here.
+    const pm = scope?.pm || { name: 'npm' as const, berry: false, viaCorepack: false };
+    const startCmd = scope?.pkg
+      ? runScriptCmd(pm, { pkg: scope.pkg, script: 'start' })
+      : runScriptCmd(pm, { script: 'start' });
     const [startScript, ...startRest] = startCmd.split(' ');
-    return `
-module.exports = {
-  apps: [{
-    name: '${app.name}',
-    cwd: '${currentPath}',
-    script: '${startScript}',
-    args: '${startRest.join(' ')}',
-    interpreter: 'none',
-    instances: 1,
-    autorestart: true,
-    watch: false,
-    max_memory_restart: '1G',
-    env: {
-${envString}
-    }
-  }]
-};
-`;
+    return emit({
+      script: JSON.stringify(startScript),
+      args: startRest.join(' '),
+      cwd: JSON.stringify(currentPath),
+      interpreter: 'none',
+    });
   };
   // Move the following methods inside the DeployService class
 
-  private async updateNginxConfig(app: any) {
+  private async updateNginxConfig(app: any, runtime?: RuntimeKind) {
     // Preserve HTTPS across redeploys: if a Let's Encrypt cert already exists for this
     // domain, regenerate the vhost WITH the :443 ssl block instead of an HTTP-only
     // config (which would wipe certbot's SSL and make the domain fall through to the
     // 443 default_server — i.e. another app).
     const hasCert = Boolean(app.domain && fs.existsSync(`/etc/letsencrypt/live/${app.domain}/fullchain.pem`));
-    const config = app.type === 'vitejs'
+    // Only a genuinely static deploy gets the /var/www root. A Vite app running in a
+    // container serves its own files, so it needs the proxy vhost like anything else —
+    // pointing nginx at an empty /var/www/<app> would serve 404s next to a healthy container.
+    const kind: RuntimeKind = runtime || app.activeRuntime || (app.type === 'vitejs' ? 'static' : 'pm2');
+    const config = kind === 'static'
       ? staticVhostConfig({ domain: app.domain, appName: app.name, hasCert })
       : proxyVhostConfig({ domain: app.domain, port: app.port, hasCert });
 

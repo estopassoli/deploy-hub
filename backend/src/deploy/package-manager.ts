@@ -114,6 +114,43 @@ export function turboBuildCmd(pm: PmInfo, pkg: string): string {
   return execCmd(pm, { argv: ['turbo', 'run', 'build', `--filter=${pkg}`] });
 }
 
+/**
+ * JS prelude for a generated PM2 config that resolves a package's executable from
+ * the RELEASE's own node_modules — never from PATH.
+ *
+ * Why this exists: deploy servers accumulate globally installed CLIs that squat the
+ * same names. This one has next@16, tsc@2 (the registry squatter, not the compiler),
+ * typescript@7, tailwind@4, vite@8, eslint and turbo installed globally. Starting an
+ * app through `pnpm exec next start` hands the choice to PATH, and a Next 16 CLI
+ * launched against a Next 15 build starts, prints "✓ Ready", then dies with
+ * "Cannot read properties of undefined (reading 'map')" — restarting forever behind
+ * a 502 while the deploy itself reported success.
+ *
+ * `require.resolve` never consults PATH. It finds the package this release
+ * installed, and no server-level configuration can redirect it.
+ *
+ * The executable path comes from the package's own `bin` field rather than a
+ * hardcoded `dist/bin/next`: that path is an internal detail that moves between
+ * versions, and pinning it would be the next thing to break on its own.
+ *
+ * Resolution failure throws at `pm2 start`, which is the point — a missing package
+ * surfaces as a loud deploy error instead of silently running the wrong binary.
+ */
+export function binResolverPrelude(o: { varName: string; pkg: string; bin: string; resolveFrom: string }): string {
+  return `const { createRequire } = require('module');
+const path = require('path');
+
+function resolveBin(pkg, bin, from) {
+  const manifestPath = createRequire(path.join(from, 'noop.js')).resolve(pkg + '/package.json');
+  const field = require(manifestPath).bin;
+  const rel = typeof field === 'string' ? field : field && field[bin];
+  if (!rel) throw new Error('O pacote "' + pkg + '" em ' + from + ' não expõe o executável "' + bin + '".');
+  return path.resolve(path.dirname(manifestPath), rel);
+}
+
+const ${o.varName} = resolveBin(${JSON.stringify(o.pkg)}, ${JSON.stringify(o.bin)}, ${JSON.stringify(o.resolveFrom)});`;
+}
+
 /** Detect app framework from a directory's package.json deps. Null if unknown. */
 export function detectAppType(appWorkDir: string): AppType | null {
   try {

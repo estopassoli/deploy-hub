@@ -29,43 +29,67 @@ class WebSocketClient {
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
   private connectionPromise: Promise<Socket> | null = null;
 
-  connect(): Promise<Socket> {
-    if (this.socket?.connected) {
-      return Promise.resolve(this.socket);
+  // Lazily create the socket once and attach the persistent listeners. The
+  // socket auto-reconnects on its own; we never create more than one instance.
+  private ensureSocket(): Socket {
+    if (this.socket) return this.socket;
+
+    const socket = io(WS_URL, {
+      // Allow the polling fallback: a websocket-only handshake is fragile behind
+      // proxies/CDNs (e.g. Cloudflare) and a single failure used to hang deploys.
+      transports: ['websocket', 'polling'],
+      autoConnect: true,
+      reconnection: true,
+    });
+
+    socket.on('connect', () => console.log('WebSocket connected'));
+    socket.on('disconnect', () => console.log('WebSocket disconnected'));
+    socket.on('connect_error', (err) =>
+      console.warn('WebSocket connect_error:', err?.message ?? err),
+    );
+    socket.on('log', (data) => this.emit('log', data));
+    socket.on('log-error', (data) => this.emit('log-error', data));
+
+    this.socket = socket;
+    return socket;
+  }
+
+  connect(timeoutMs = 8000): Promise<Socket> {
+    const socket = this.ensureSocket();
+
+    if (socket.connected) {
+      return Promise.resolve(socket);
     }
 
     if (this.connectionPromise) {
       return this.connectionPromise;
     }
 
-    this.connectionPromise = new Promise((resolve) => {
-      this.socket = io(WS_URL, {
-        transports: ['websocket'],
-        autoConnect: true,
-      });
-
-      this.socket.on('connect', () => {
-        console.log('WebSocket connected');
-        resolve(this.socket!);
-      });
-
-      this.socket.on('disconnect', () => {
-        console.log('WebSocket disconnected');
+    // Always settle this promise (resolve, reject, or timeout) and clear the
+    // cached reference afterwards, so a failed attempt never permanently
+    // "poisons" future connect() calls (the bug that silently killed deploys).
+    this.connectionPromise = new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.off('connect', onConnect);
+        socket.off('connect_error', onError);
         this.connectionPromise = null;
-      });
+      };
+      const onConnect = () => {
+        cleanup();
+        resolve(socket);
+      };
+      const onError = (err: unknown) => {
+        cleanup();
+        reject(err instanceof Error ? err : new Error('WebSocket connection error'));
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('WebSocket connection timed out'));
+      }, timeoutMs);
 
-      this.socket.on('log', (data) => {
-        this.emit('log', data);
-      });
-
-      this.socket.on('log-error', (data) => {
-        this.emit('log-error', data);
-      });
-
-      // If already connected (edge case)
-      if (this.socket.connected) {
-        resolve(this.socket);
-      }
+      socket.on('connect', onConnect);
+      socket.on('connect_error', onError);
     });
 
     return this.connectionPromise;
@@ -80,9 +104,13 @@ class WebSocketClient {
   }
 
   subscribeLogs(appName: string) {
-    this.connect().then(socket => {
-      socket.emit('subscribe-logs', { appName });
-    });
+    this.connect()
+      .then(socket => {
+        socket.emit('subscribe-logs', { appName });
+      })
+      .catch(err => {
+        console.warn('subscribeLogs: WebSocket unavailable:', err?.message ?? err);
+      });
   }
 
   unsubscribeLogs() {
@@ -116,7 +144,9 @@ class WebSocketClient {
 export const wsClient = new WebSocketClient();
 export const getSocket = () => {
   if (!wsClient.getSocket()) {
-    wsClient.connect();
+    // Fire-and-forget: swallow the rejection so a failed connect never becomes
+    // an unhandled promise rejection. The socket auto-reconnects in background.
+    wsClient.connect().catch(() => {});
   }
   return wsClient.getSocket()!;
 };
