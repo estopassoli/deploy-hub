@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { PrismaService } from '../prisma/prisma.service';
+import { appLogs } from '../deploy/docker';
 
 const execAsync = promisify(exec);
 
@@ -30,7 +31,11 @@ export class LogsService {
         if (!app) return [];
 
         try {
-            const { stdout } = await execAsync(`pm2 logs ${app.name} --lines ${lines} --nostream 2>&1 || true`);
+            // A containerised app has no PM2 entry at all, so asking pm2 would return an
+            // empty panel rather than the app's output.
+            const stdout = app.activeRuntime === 'docker'
+                ? await appLogs(app.name, lines)
+                : (await execAsync(`pm2 logs ${app.name} --lines ${lines} --nostream 2>&1 || true`)).stdout;
             return this.parseLogOutput(stdout, app.name);
         } catch (error) {
             return [];

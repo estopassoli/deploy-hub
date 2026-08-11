@@ -4,6 +4,7 @@ import { DeployGateway } from '../deploy/deploy.gateway';
 import { EmailService } from '../email/email.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { appState, appStats } from '../deploy/docker';
 
 const execAsync = promisify(exec);
 const COLLECT_INTERVAL = 30000; // 30 seconds
@@ -43,17 +44,24 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
 
   async collectAllMetrics() {
     try {
+      // Static apps have no process to sample. Containerised ones do, whatever their
+      // type: a dockerized Vite app is a running nginx, not files on disk.
       const apps = await this.prisma.app.findMany({
-        where: { type: { not: 'vitejs' } }, // Only collect for PM2-managed apps
+        where: { OR: [{ type: { not: 'vitejs' } }, { activeRuntime: 'docker' }] },
       });
 
       const pm2Data = await this.getPM2Metrics();
 
       for (const app of apps) {
+        if (app.activeRuntime === 'docker') {
+          await this.collectDockerMetrics(app);
+          continue;
+        }
+
         const proc = pm2Data.find((p: any) => p.name === app.name);
         const previousStatus = this.previousAppStatuses.get(app.id);
         const currentStatus = proc?.pm2_env?.status;
-        
+
         // Detect if app stopped unexpectedly
         if (previousStatus === 'online' && currentStatus !== 'online') {
           console.log(`[MetricsService] App ${app.name} stopped unexpectedly`);
@@ -105,6 +113,38 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       console.error('[MetricsService] Error collecting metrics:', error);
+    }
+  }
+
+  /**
+   * Sample one containerised app and raise the same "stopped unexpectedly" alert the
+   * PM2 path raises, so a crashed container is not silently invisible in the panel.
+   */
+  private async collectDockerMetrics(app: { id: string; name: string }) {
+    const state = await appState(app.name);
+    const previousStatus = this.previousAppStatuses.get(app.id);
+    const currentStatus = state.running ? 'online' : 'stopped';
+
+    if (previousStatus === 'online' && currentStatus !== 'online') {
+      console.log(`[MetricsService] Container ${app.name} stopped unexpectedly`);
+      this.deployGateway.emitAppStopped(app.name, 'Container exited unexpectedly');
+      this.emailService.notifyAppStopped(app.name, 'Container exited unexpectedly').catch(console.error);
+      await this.prisma.app.update({ where: { id: app.id }, data: { status: 'stopped' } });
+      await this.prisma.systemLog.create({
+        data: {
+          level: 'error',
+          message: `Container ${app.name} parou inesperadamente (${state.status})`,
+          source: 'monitor',
+          appId: app.id,
+        },
+      });
+    }
+
+    this.previousAppStatuses.set(app.id, currentStatus);
+
+    if (state.running) {
+      const { cpu, memory } = await appStats(app.name);
+      await this.prisma.appMetric.create({ data: { appId: app.id, cpu, memory } });
     }
   }
 

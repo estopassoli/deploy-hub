@@ -22,3 +22,9 @@ dist-ssr
 *.sln
 *.sw?
 backend/prisma/deployhub.db
+
+.env
+backend/.env
+install-info.txt
+*.bak
+*.bak.tar.gz

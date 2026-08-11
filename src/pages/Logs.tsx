@@ -55,7 +55,7 @@ export default function Logs() {
 
   useEffect(() => {
     if (isStreaming) {
-      wsClient.connect();
+      wsClient.connect().catch(() => {});
       
       const handleLog = (logData: any) => {
         const newLog: LogLine = {

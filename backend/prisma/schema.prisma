@@ -33,6 +33,10 @@ model App {
   startCommand    String?     // Custom start command (optional)
   appDir           String?   // monorepo target subdir, e.g. "apps/backend"
   workspacePackage String?   // workspace package name, e.g. "@blurp/backend"
+  runtime          String    @default("auto") // what the user asked for: auto | pm2 | docker
+  activeRuntime    String?   // what actually runs it right now: pm2 | docker | static
+  containerPort    Int?      // port inside the container; defaults to the Dockerfile EXPOSE, else `port`
+  dockerContext    String?   // build context relative to the repo root; defaults to the repo root
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   deploys         Deploy[]

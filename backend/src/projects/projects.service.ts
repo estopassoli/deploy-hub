@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DeployService } from '../deploy/deploy.service';
 import { detectPackageManager } from '../deploy/package-manager';
 import { scanWorkspaceApps, filterAvailableServices } from './workspace-scan';
+import { removeApp, removeImages } from '../deploy/docker';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
@@ -216,10 +217,15 @@ export class ProjectsService {
       throw new BadRequestException('Este é o último service do projeto — exclua o projeto inteiro.');
     }
 
+    // Both supervisors are torn down regardless of activeRuntime: a service that moved
+    // between runtimes can have leftovers on the other side, and a removal that leaves
+    // a container holding the port breaks whatever is deployed there next.
     await execAsync(`pm2 delete ${svc.name}`).catch(() => undefined);
+    await removeApp(svc.name).catch(() => undefined);
+    await removeImages(svc.name).catch(() => undefined);
     await execAsync(`sudo rm -f /etc/nginx/sites-available/${svc.name}.conf /etc/nginx/sites-enabled/${svc.name}.conf`).catch(() => undefined);
     await execAsync(`sudo rm -rf /var/www/${svc.name}`).catch(() => undefined);
-    await execAsync(`rm -f ${path.join(APPS_DIR, project.name, `${svc.name}.ecosystem.config.js`)}`).catch(() => undefined);
+    await execAsync(`rm -f ${path.join(APPS_DIR, project.name, `${svc.name}.ecosystem.config.js`)} ${path.join(APPS_DIR, project.name, `${svc.name}.env`)}`).catch(() => undefined);
     await execAsync('pm2 save').catch(() => undefined);
     await execAsync('sudo systemctl reload nginx').catch(() => undefined);
     // AppMetric rows and this service's own Deploy rows (appId set) cascade on App delete
@@ -254,6 +260,8 @@ export class ProjectsService {
     if (!project) throw new NotFoundException('Projeto não encontrado');
     for (const svc of project.apps) {
       await execAsync(`pm2 delete ${svc.name}`).catch(() => undefined);
+      await removeApp(svc.name).catch(() => undefined);
+      await removeImages(svc.name).catch(() => undefined);
       await execAsync(`sudo rm -f /etc/nginx/sites-available/${svc.name}.conf /etc/nginx/sites-enabled/${svc.name}.conf`).catch(() => undefined);
       await execAsync(`sudo rm -rf /var/www/${svc.name}`).catch(() => undefined);
     }

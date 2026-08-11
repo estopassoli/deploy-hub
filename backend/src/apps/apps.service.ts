@@ -6,9 +6,31 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { proxyVhostConfig, staticVhostConfig } from '../deploy/nginx-config';
+import {
+  appState,
+  appStats,
+  removeApp,
+  removeImages,
+  stopApp,
+  startApp as startContainers,
+  restartApp as restartContainers,
+  detectDockerAssets,
+  composeBin,
+  composeUpCmd,
+  runContainerCmd,
+  containerName,
+  imageTag,
+  imageExists,
+  parseExposedPort,
+} from '../deploy/docker';
 
 const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
+
+/** True when the app is supervised by Docker rather than PM2 or plain static files. */
+function isDocker(app: { activeRuntime?: string | null }): boolean {
+  return app.activeRuntime === 'docker';
+}
 
 @Injectable()
 export class AppsService {
@@ -20,11 +42,20 @@ export class AppsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Enrich with PM2 status or static file check for Vite.js
+    // Enrich with runtime status: containers, PM2 processes or static files on disk.
     const enrichedApps = await Promise.all(
       apps.map(async (app) => {
         const currentDeploy = app.deploys[0];
-        
+
+        if (isDocker(app)) {
+          const dockerStatus = await this.getDockerStatus(app.name);
+          return {
+            ...app,
+            ...dockerStatus,
+            currentVersion: currentDeploy?.version || '-',
+          };
+        }
+
         // For Vite.js apps, check if static files exist in /var/www
         if (app.type === 'vitejs') {
           const staticStatus = await this.getStaticAppStatus(app.name);
@@ -84,8 +115,37 @@ export class AppsService {
 
     if (!app) throw new NotFoundException('App não encontrado');
 
-    const pm2Status = await this.getPM2Status(app.name);
-    return { ...app, ...pm2Status };
+    const status = isDocker(app)
+      ? await this.getDockerStatus(app.name)
+      : await this.getPM2Status(app.name);
+    return { ...app, ...status };
+  }
+
+  /**
+   * Status of a containerised app, in the same shape the PM2 path returns.
+   *
+   * Uptime comes from the container's StartedAt rather than a counter we keep: a
+   * container restarted by `--restart unless-stopped` reports the new start time, which
+   * is exactly the number an operator expects to see.
+   */
+  private async getDockerStatus(
+    appName: string,
+  ): Promise<{ status: string; uptime: string; cpu: number; memory: number }> {
+    const state = await appState(appName);
+    if (state.count === 0) {
+      return { status: 'stopped', uptime: '-', cpu: 0, memory: 0 };
+    }
+    if (!state.running) {
+      return { status: state.status === 'restarting' ? 'error' : 'stopped', uptime: '-', cpu: 0, memory: 0 };
+    }
+    const { cpu, memory } = await appStats(appName);
+    const startedAt = state.startedAt ? Date.parse(state.startedAt) : NaN;
+    return {
+      status: 'running',
+      uptime: Number.isFinite(startedAt) ? this.formatUptime(Date.now() - startedAt) : '-',
+      cpu,
+      memory,
+    };
   }
 
   async create(data: { name: string; type: string; port: number; domain?: string; repository: string; branch?: string; appDir?: string; workspacePackage?: string }) {
@@ -125,7 +185,7 @@ export class AppsService {
     return app;
   }
 
-  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string }) {
+  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; runtime?: string; containerPort?: number | string | null; dockerContext?: string }) {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
@@ -143,6 +203,23 @@ export class AppsService {
     if (data.startCommand !== undefined) updateData.startCommand = data.startCommand || null;
     if (data.appDir !== undefined) updateData.appDir = data.appDir || null;
     if (data.workspacePackage !== undefined) updateData.workspacePackage = data.workspacePackage || null;
+    // runtime is NOT NULL with a default; an empty value means "back to auto" rather
+    // than null, which would violate the column.
+    if (data.runtime !== undefined) {
+      const runtime = String(data.runtime || 'auto');
+      if (!['auto', 'pm2', 'docker'].includes(runtime)) {
+        throw new ConflictException(`Runtime inválido: ${runtime}. Use auto, pm2 ou docker.`);
+      }
+      updateData.runtime = runtime;
+    }
+    if (data.containerPort !== undefined) {
+      const port = data.containerPort === null || data.containerPort === '' ? null : Number(data.containerPort);
+      if (port !== null && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+        throw new ConflictException(`Container port inválida: ${data.containerPort}`);
+      }
+      updateData.containerPort = port;
+    }
+    if (data.dockerContext !== undefined) updateData.dockerContext = data.dockerContext || null;
 
     console.log('[AppsService] Update data to save:', JSON.stringify(updateData, null, 2));
 
@@ -172,13 +249,23 @@ export class AppsService {
 
     console.log('[AppsService] Deleting app:', app.name);
 
-    // Stop PM2 process
+    // Stop whatever is supervising it. Both are attempted regardless of activeRuntime:
+    // an app that moved between runtimes can have leftovers on the other side, and the
+    // whole point of a delete is to leave nothing holding the port.
     try {
       console.log('[AppsService] Stopping PM2 process:', app.name);
       await execAsync(`pm2 delete ${app.name}`);
       await execAsync('pm2 save');
     } catch (e) {
       console.log('[AppsService] PM2 delete error (may not exist):', e.message);
+    }
+
+    try {
+      console.log('[AppsService] Removing containers and images:', app.name);
+      await removeApp(app.name);
+      await removeImages(app.name);
+    } catch (e) {
+      console.log('[AppsService] Docker cleanup error:', e.message);
     }
 
     // Remove Nginx config
@@ -218,6 +305,16 @@ export class AppsService {
   async start(id: string) {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
+
+    if (isDocker(app)) {
+      try {
+        await startContainers(app.name);
+        await this.prisma.app.update({ where: { id }, data: { status: 'running' } });
+        return { success: true };
+      } catch (error) {
+        throw new Error(`Falha ao iniciar: ${error.message}`);
+      }
+    }
 
     if (app.type === 'vitejs') {
       // Static apps don't need PM2
@@ -275,7 +372,11 @@ export class AppsService {
     if (!app) throw new NotFoundException('App não encontrado');
 
     try {
-      await execAsync(`pm2 stop ${app.name}`);
+      if (isDocker(app)) {
+        await stopApp(app.name);
+      } else {
+        await execAsync(`pm2 stop ${app.name}`);
+      }
       await this.prisma.app.update({ where: { id }, data: { status: 'stopped' } });
       return { success: true };
     } catch (error) {
@@ -288,7 +389,11 @@ export class AppsService {
     if (!app) throw new NotFoundException('App não encontrado');
 
     try {
-      await execAsync(`pm2 restart ${app.name}`);
+      if (isDocker(app)) {
+        await restartContainers(app.name);
+      } else {
+        await execAsync(`pm2 restart ${app.name}`);
+      }
       return { success: true };
     } catch (error) {
       throw new Error(`Falha ao reiniciar: ${error.message}`);
@@ -319,8 +424,10 @@ export class AppsService {
     try {
       await execAsync(`rm -f ${currentLink} && ln -s ${deploy.path} ${currentLink}`);
 
-      // Restart PM2 if needed
-      if (app.type !== 'vitejs') {
+      if (isDocker(app)) {
+        await this.rollbackDocker(app, deploy);
+      } else if (app.type !== 'vitejs') {
+        // Restart PM2 if needed
         await execAsync(`pm2 restart ${app.name}`);
       }
 
@@ -333,6 +440,57 @@ export class AppsService {
     } catch (error) {
       throw new Error(`Falha no rollback: ${error.message}`);
     }
+  }
+
+  /**
+   * Put a containerised app back on an older release.
+   *
+   * Moving the `current` symlink is meaningless for a container: its code came from an
+   * image, not from the release directory. Each deploy leaves its image tagged with the
+   * release version, so rolling back is running that exact tag again — the same bits
+   * that were serving before, with none of a rebuild's risk of picking up a moved
+   * upstream dependency.
+   *
+   * Compose owns its own containers and ports, so there we re-apply the old release's
+   * compose file instead.
+   */
+  private async rollbackDocker(app: any, deploy: { path: string; version: string }) {
+    const workDir = app.appDir ? path.join(deploy.path, app.appDir) : deploy.path;
+    const assets = detectDockerAssets(workDir, deploy.path);
+    const envFile = path.join(APPS_DIR, app.name, `${app.name}.env`);
+
+    if (assets.composeFile) {
+      const bin = await composeBin();
+      if (!bin) throw new Error('compose não está disponível neste host');
+      await execAsync(composeUpCmd(bin, { project: app.name, file: assets.composeFile }), {
+        cwd: path.dirname(assets.composeFile),
+      });
+      return;
+    }
+
+    const tag = imageTag(app.name, deploy.version);
+    if (!(await imageExists(tag))) {
+      throw new Error(
+        `A imagem ${tag} não existe mais neste host (provavelmente removida por um docker prune). Refaça o deploy do commit desejado.`,
+      );
+    }
+
+    let containerPort: number = app.containerPort || 0;
+    if (!containerPort && assets.dockerfile) {
+      containerPort = parseExposedPort(await fs.promises.readFile(assets.dockerfile, 'utf-8').catch(() => '')) || 0;
+    }
+    if (!containerPort) containerPort = app.port;
+
+    await removeApp(app.name);
+    await execAsync(
+      runContainerCmd({
+        name: containerName(app.name),
+        image: tag,
+        hostPort: app.port,
+        containerPort,
+        envFile: fs.existsSync(envFile) ? envFile : null,
+      }),
+    );
   }
 
   private async getPM2Status(appName: string): Promise<{ status: string; uptime: string; cpu: number; memory: number }> {
@@ -404,7 +562,10 @@ export class AppsService {
     // Same SSL-preserving behavior as the deploy path: keep the certbot :443 block
     // across config regenerations when a Let's Encrypt cert exists for the domain.
     const hasCert = Boolean(app.domain && fs.existsSync(`/etc/letsencrypt/live/${app.domain}/fullchain.pem`));
-    const config = app.type === 'vitejs'
+    // A Vite app running in a container serves its own files — only a genuinely static
+    // deploy gets the /var/www root.
+    const isStatic = app.activeRuntime ? app.activeRuntime === 'static' : app.type === 'vitejs';
+    const config = isStatic
       ? staticVhostConfig({ domain: app.domain, appName: app.name, hasCert })
       : proxyVhostConfig({ domain: app.domain, port: app.port, hasCert });
 

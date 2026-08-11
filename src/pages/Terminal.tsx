@@ -117,7 +117,9 @@ export default function Terminal() {
       };
     };
 
-    init();
+    init().catch((err) => {
+      console.warn('Terminal: failed to initialize WebSocket session:', err);
+    });
 
     return () => {
       mounted = false;
