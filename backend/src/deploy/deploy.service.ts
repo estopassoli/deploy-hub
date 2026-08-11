@@ -17,6 +17,8 @@ import {
   execCmd,
   turboBuildCmd,
   turboBuildManyCmd,
+  hardenedPath,
+  resolveBin,
 } from './package-manager';
 import type { PmInfo } from './package-manager';
 import { proxyVhostConfig, staticVhostConfig } from './nginx-config';
@@ -168,13 +170,23 @@ export class DeployService {
     return new Promise((resolve, reject) => {
       this.log(appName, `$ ${command}`, deployId);
 
+      // The server's PATH goes AFTER the release's own binaries.
+      //
+      // These commands run through a shell, so every tool name is resolved by
+      // PATH — and a deploy box usually has next, tsc, vite and eslint
+      // installed globally. Without this, `next build` picks the global one; a
+      // newer global Next run against the version the project installed fails
+      // looking for an internal file that only exists in its own release.
+      const basePath = extraEnv?.PATH || process.env.PATH || '';
+
       const proc = spawn(command, [], {
         cwd,
         shell: true,
         env: {
           ...process.env,
           FORCE_COLOR: '0',
-          ...extraEnv
+          ...extraEnv,
+          PATH: hardenedPath(cwd, basePath)
         }
       });
 
@@ -982,6 +994,9 @@ export class DeployService {
     const isSupported = ['nestjs', 'nextjs'].includes(effectiveType);
     if (!isSupported) return '';
 
+    // In a monorepo the process starts from the app's dir, not the repo root.
+    const appCwd = app.appDir ? path.join(currentPath, app.appDir) : currentPath;
+
     // Merge base env with user-provided env vars
     const baseEnv = {
       NODE_ENV: 'production',
@@ -1009,7 +1024,7 @@ export class DeployService {
 module.exports = {
   apps: [{
     name: '${app.name}',
-    cwd: '${currentPath}',
+    cwd: '${appCwd}',
     script: '${script}',
     args: '${args}',
     interpreter: 'none',
@@ -1036,7 +1051,7 @@ ${envString}
 module.exports = {
   apps: [{
     name: '${app.name}',
-    cwd: '${currentPath}',
+    cwd: '${appCwd}',
     script: '${script}',
     args: '${rest.join(' ')}',
     interpreter: 'none',
@@ -1059,8 +1074,8 @@ ${envString}
 module.exports = {
   apps: [{
     name: '${app.name}',
-    cwd: '${currentPath}',
-    script: 'node_modules/.bin/next',
+    cwd: '${appCwd}',
+    script: '${resolveBin('next', appCwd, currentPath)}',
     args: 'start --port ${app.port}',
     interpreter: 'none',
     instances: 1,
@@ -1082,7 +1097,7 @@ ${envString}
 module.exports = {
   apps: [{
     name: '${app.name}',
-    cwd: '${currentPath}',
+    cwd: '${appCwd}',
     script: '${startScript}',
     args: '${startRest.join(' ')}',
     interpreter: 'none',
