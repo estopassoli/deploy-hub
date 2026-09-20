@@ -26,6 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EnvEditor } from '@/components/apps/EnvEditor';
 import { ConfirmDeleteDialog } from '@/components/apps/ConfirmDeleteDialog';
 import { DeployLogSheet } from '@/components/apps/DeployLogSheet';
+import { UptimePanel } from '@/components/apps/UptimePanel';
 import { AppMetricsChart } from '@/components/dashboard/AppMetricsChart';
 import { DetailHeaderSkeleton, LogLinesSkeleton, VersionListSkeleton } from '@/components/Skeletons';
 import api from '@/lib/api';
@@ -217,7 +218,8 @@ export default function AppDetail() {
     );
   }
 
-  const isStatic = app.activeRuntime === 'static' || (app.type === 'vitejs' && !app.activeRuntime);
+  // Vem da API: o backend conhece o registro de presets, o frontend não precisa.
+  const isStatic = Boolean(app.isStatic);
   const statusColor =
     app.status === 'running' ? 'bg-success' : app.hasProblem ? 'bg-destructive' : 'bg-muted-foreground';
 
@@ -335,6 +337,9 @@ export default function AppDetail() {
                 Histórico de CPU/RAM
               </Button>
             </div>
+
+            {/* Disponibilidade externa e validade do certificado. */}
+            <UptimePanel appId={app.id} domain={app.domain} />
 
             <AppMetricsChart appId={app.id} appName={app.name} open={metricsOpen} onOpenChange={setMetricsOpen} />
           </TabsContent>

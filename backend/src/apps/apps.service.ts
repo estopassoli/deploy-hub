@@ -75,6 +75,7 @@ export class AppsService {
             ...dockerStatus,
             currentVersion: currentDeploy?.version || '-',
             hasProblem: hasProblem({ ...app, ...dockerStatus }),
+            isStatic: app.activeRuntime === 'static',
           };
         }
 
@@ -89,6 +90,7 @@ export class AppsService {
             memory: 0,
             currentVersion: currentDeploy?.version || '-',
             hasProblem: hasProblem({ ...app, status: staticStatus.status }),
+            isStatic: true,
           };
         }
         
@@ -102,6 +104,7 @@ export class AppsService {
           memory: pm2Status.memory,
           currentVersion: currentDeploy?.version || '-',
           hasProblem: hasProblem({ ...app, status: pm2Status.status }),
+          isStatic: false,
         };
       })
     );
@@ -142,7 +145,11 @@ export class AppsService {
     const status = isDocker(app)
       ? await this.getDockerStatus(app.name)
       : await this.getPM2Status(app.name);
-    return { ...app, ...status, hasProblem: hasProblem({ ...app, ...status }) };
+    // `isStatic` vem da API para o frontend não precisar reimplementar o registro de
+    // presets: quem decide é o `activeRuntime` do último deploy, com o preset como
+    // fallback para app que ainda não foi deployado.
+    const isStatic = app.activeRuntime ? app.activeRuntime === 'static' : isStaticPreset(app.type);
+    return { ...app, ...status, hasProblem: hasProblem({ ...app, ...status }), isStatic };
   }
 
   /**

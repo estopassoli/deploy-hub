@@ -306,6 +306,29 @@ class ApiClient {
     });
   }
 
+  // Uptime e SSL
+  /** Disponibilidade do domínio e validade do certificado. */
+  async getUptime(appId: string, hours = 24) {
+    return this.request<{
+      domain: string | null;
+      enabled: boolean;
+      currentStatus: string | null;
+      lastCheckedAt: string | null;
+      uptimePercentage: number | null;
+      averageResponseMs: number | null;
+      checks: Array<{ status: string; statusCode: number | null; responseMs: number | null; error: string | null; checkedAt: string }>;
+      ssl: { expiresAt: string | null; daysRemaining: number | null; status: 'ok' | 'expiring' | 'expired' | 'unknown' };
+    }>(`/uptime/${appId}?hours=${hours}`);
+  }
+
+  /** Força uma checagem agora, sem esperar o cron. */
+  async checkUptimeNow(appId: string) {
+    return this.request<{ status: string; statusCode?: number; responseMs?: number; error?: string; sslExpiresAt: string | null }>(
+      `/uptime/${appId}/check`,
+      { method: 'POST' },
+    );
+  }
+
   // Metrics
   async getAppMetrics(appId: string, hours: number = 1) {
     return this.request<Array<{ cpu: number; memory: number; time: string }>>(`/metrics/${appId}?hours=${hours}`);

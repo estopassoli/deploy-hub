@@ -47,10 +47,17 @@ model App {
   // "Problemas" do Dashboard contava só `status === 'error'` e vivia mostrando 0,
   // mesmo com app caído.
   desiredState     String    @default("running")
+
+  // Monitoramento externo (Fase 6.3). Só faz sentido para app com domínio.
+  uptimeEnabled    Boolean   @default(true)
+  lastUptimeStatus String?   // up | down
+  lastUptimeAt     DateTime?
+  sslExpiresAt     DateTime? // notAfter do certificado servido pelo domínio
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   deploys         Deploy[]
   metrics         AppMetric[]
+  uptimeChecks    UptimeCheck[]
   webhookSecret   String?
   projectId       String?
   project         Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -115,6 +122,25 @@ model SystemLog {
   source    String?
   appId     String?
   createdAt DateTime @default(now())
+}
+
+// Resultado de uma checagem HTTP externa do domínio de um app.
+//
+// Diferente do health check do deploy, que bate em 127.0.0.1: aqui a requisição passa
+// por DNS, nginx e TLS, que é o caminho que o usuário final percorre. Um app pode estar
+// perfeitamente vivo no PM2 e mesmo assim inacessível — certificado vencido, vhost
+// apagado, DNS mudado.
+model UptimeCheck {
+  id         String   @id @default(uuid())
+  appId      String
+  app        App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+  status     String   // up | down
+  statusCode Int?
+  responseMs Int?
+  error      String?
+  checkedAt  DateTime @default(now())
+
+  @@index([appId, checkedAt])
 }
 
 model AppMetric {
