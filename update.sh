@@ -54,9 +54,63 @@ print_success "Repositório atualizado"
 print_status "Verificando configuração obrigatória..."
 BACKEND_ENV="$DEPLOYHUB_DIR/backend/.env"
 
+# Instalação antiga não tinha backend/.env — e não precisava.
+#
+# Até esta versão o código tinha valor padrão para tudo: porta 10001, APPS_DIR
+# /root/apps, e um JWT_SECRET embutido no repositório. Quem instalou assim nunca
+# criou o arquivo, e mandar rodar o `setup.sh` aqui seria péssimo conselho: ele é
+# para instalação NOVA — cria banco, cria admin e reescreve vhosts.
+#
+# Então o arquivo é criado aqui, com exatamente os mesmos padrões que já estavam
+# valendo. Nada muda de comportamento; o que muda é que os segredos passam a ser
+# gerados por instalação em vez de virem do repositório.
 if [ ! -f "$BACKEND_ENV" ]; then
-    print_error "backend/.env não encontrado. Rode 'sudo bash backend/setup.sh' antes de atualizar."
-    exit 1
+    DB_EXISTENTE="$DEPLOYHUB_DIR/backend/prisma/deployhub.db"
+
+    if [ ! -f "$DB_EXISTENTE" ]; then
+        print_error "backend/.env e o banco não existem — isto parece uma instalação nova."
+        echo ""
+        echo "  Para instalar do zero:  sudo bash backend/setup.sh"
+        echo ""
+        exit 1
+    fi
+
+    print_warning "backend/.env não existe, mas o banco sim: instalação anterior a esta versão."
+    print_status "Criando backend/.env com os padrões que já estavam em uso..."
+
+    cat > "$BACKEND_ENV" <<ENVEOF
+# Gerado pelo update.sh ao migrar uma instalação que rodava sem backend/.env.
+# Os valores abaixo são os MESMOS padrões que o código usava antes — nada muda de
+# comportamento. O que muda é que os segredos agora são desta instalação, e não
+# constantes publicadas no repositório.
+
+NODE_ENV=production
+PORT=10001
+APPS_DIR=/root/apps
+
+# Obrigatório: o backend não sobe sem ele. O padrão antigo estava no repositório,
+# ou seja, qualquer pessoa podia forjar um token de acesso ao painel.
+# Consequência de criá-lo agora: as sessões abertas caem e todos precisam entrar de
+# novo — com o MESMO e-mail e a MESMA senha. Nenhum dado é perdido.
+JWT_SECRET=$(openssl rand -hex 32)
+
+# Origens permitidas no CORS da API e dos WebSockets, separadas por vírgula.
+# Vazio mantém o comportamento antigo (aceita qualquer origem). Recomendado apontar
+# para o domínio do painel:  CORS_ORIGINS=https://painel.seudominio.com
+CORS_ORIGINS=
+
+# Exigido por POST /auth/register. Vazio = registro de novas contas desabilitado
+# (403), que é o comportamento seguro: toda conta deste painel administra o servidor.
+# Para habilitar:  REGISTRATION_SECRET=\$(openssl rand -hex 16)
+REGISTRATION_SECRET=
+ENVEOF
+
+    chmod 600 "$BACKEND_ENV"
+    print_success "backend/.env criado (permissão 600)"
+    echo ""
+    print_warning "Você precisará ENTRAR NO PAINEL DE NOVO depois deste update."
+    print_warning "Mesmo e-mail, mesma senha — só as sessões abertas é que caem."
+    echo ""
 fi
 
 if ! grep -qE '^[[:space:]]*JWT_SECRET=.+' "$BACKEND_ENV"; then
