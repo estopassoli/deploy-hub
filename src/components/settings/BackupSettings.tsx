@@ -156,11 +156,11 @@ export function BackupSettings() {
       </div>
 
       <div className="flex flex-wrap justify-end gap-2">
-        <Button variant="outline" size="sm" disabled={running} onClick={rodarAgora}>
+        <Button variant="secondary" disabled={running} onClick={rodarAgora}>
           {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
           Fazer backup agora
         </Button>
-        <Button variant="gradient" size="sm" disabled={saving} onClick={salvar}>
+        <Button variant="primary" disabled={saving} onClick={salvar}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           Salvar backup
         </Button>
@@ -191,7 +191,7 @@ export function BackupSettings() {
                   {formatDateTime(file.modifiedAt)}
                 </span>
                 <Button
-                  size="icon-sm"
+                  size="icon-xs"
                   variant="ghost"
                   disabled={downloading === file.name}
                   onClick={() => baixar(file.name)}
@@ -214,7 +214,7 @@ export function BackupSettings() {
                     await load();
                   }}
                   trigger={
-                    <Button size="icon-sm" variant="ghost" className="text-destructive hover:text-destructive" title="Excluir">
+                    <Button size="icon-xs" variant="ghost" className="text-destructive hover:text-destructive" title="Excluir">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   }

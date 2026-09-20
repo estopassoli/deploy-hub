@@ -133,7 +133,7 @@ export function EnvEditor({ value, onChange, baseline, label, description, class
         <div className="flex items-center gap-1">
           <Button
             type="button"
-            size="sm"
+           
             variant={mode === 'table' ? 'secondary' : 'ghost'}
             onClick={() => setMode('table')}
           >
@@ -142,7 +142,7 @@ export function EnvEditor({ value, onChange, baseline, label, description, class
           </Button>
           <Button
             type="button"
-            size="sm"
+           
             variant={mode === 'text' ? 'secondary' : 'ghost'}
             onClick={() => setMode('text')}
           >
@@ -204,7 +204,7 @@ export function EnvEditor({ value, onChange, baseline, label, description, class
                   />
                   {requiresRebuild(entry.key) && (
                     <span
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-[4px] border border-amber/28 bg-amber/12 px-1.5 text-2xs font-medium leading-4 text-amber"
                       title="Embutida no bundle durante o build — mudar exige redeploy, não só reiniciar"
                     >
                       build
@@ -222,7 +222,7 @@ export function EnvEditor({ value, onChange, baseline, label, description, class
                   />
                   <Button
                     type="button"
-                    size="icon-sm"
+                    size="icon-xs"
                     variant="ghost"
                     onClick={() => toggleReveal(index)}
                     title={isRevealed(index) ? 'Ocultar valor' : 'Revelar valor'}
@@ -231,7 +231,7 @@ export function EnvEditor({ value, onChange, baseline, label, description, class
                   </Button>
                   <Button
                     type="button"
-                    size="icon-sm"
+                    size="icon-xs"
                     variant="ghost"
                     className="text-destructive hover:text-destructive"
                     onClick={() => removeEntry(index)}
@@ -245,16 +245,16 @@ export function EnvEditor({ value, onChange, baseline, label, description, class
           })}
 
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={addEntry}>
+            <Button type="button" variant="secondary" onClick={addEntry}>
               <Plus className="h-4 w-4" />
               Adicionar variável
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setShowPaste((v) => !v)}>
+            <Button type="button" variant="secondary" onClick={() => setShowPaste((v) => !v)}>
               <ClipboardPaste className="h-4 w-4" />
               Colar .env
             </Button>
             {entries.length > 0 && (
-              <Button type="button" size="sm" variant="ghost" onClick={() => setRevealAll((v) => !v)}>
+              <Button type="button" variant="ghost" onClick={() => setRevealAll((v) => !v)}>
                 {revealAll ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 {revealAll ? 'Ocultar todos' : 'Revelar todos'}
               </Button>
@@ -271,10 +271,10 @@ export function EnvEditor({ value, onChange, baseline, label, description, class
                 className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
               />
               <div className="flex justify-end gap-2">
-                <Button type="button" size="sm" variant="ghost" onClick={() => setShowPaste(false)}>
+                <Button type="button" variant="ghost" onClick={() => setShowPaste(false)}>
                   Cancelar
                 </Button>
-                <Button type="button" size="sm" onClick={applyPaste}>
+                <Button type="button" onClick={applyPaste}>
                   Adicionar {parseEnv(pasteText).length || ''} variável(is)
                 </Button>
               </div>

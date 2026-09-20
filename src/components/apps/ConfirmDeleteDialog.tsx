@@ -95,8 +95,8 @@ export function ConfirmDeleteDialog({
         <AlertDialogTrigger asChild disabled={disabled}>
           {trigger ?? (
             <Button
-              size="sm"
-              variant="outline"
+             
+              variant="secondary"
               className="text-destructive hover:text-destructive"
               disabled={disabled}
             >

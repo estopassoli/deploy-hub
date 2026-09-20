@@ -213,7 +213,7 @@ export function PreviewSettings() {
       </div>
 
       <div className="flex justify-end">
-        <Button variant="gradient" size="sm" disabled={saving} onClick={salvar}>
+        <Button variant="primary" disabled={saving} onClick={salvar}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           Salvar preview
         </Button>
@@ -248,7 +248,7 @@ export function PreviewSettings() {
                   </p>
                 </div>
                 {item.domain && (
-                  <Button size="icon-sm" variant="ghost" asChild title={`Abrir ${item.domain}`}>
+                  <Button size="icon-xs" variant="ghost" asChild title={`Abrir ${item.domain}`}>
                     <a href={`https://${item.domain}`} target="_blank" rel="noreferrer">
                       <ExternalLink className="h-4 w-4" />
                     </a>
@@ -271,7 +271,7 @@ export function PreviewSettings() {
                   }}
                   trigger={
                     <Button
-                      size="icon-sm"
+                      size="icon-xs"
                       variant="ghost"
                       className="text-destructive hover:text-destructive"
                       title="Remover"

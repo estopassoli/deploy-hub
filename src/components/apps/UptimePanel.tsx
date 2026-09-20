@@ -83,7 +83,7 @@ export function UptimePanel({ appId, domain }: UptimePanelProps) {
           <Activity className="h-4 w-4 text-primary" />
           <h3 className="font-semibold text-foreground">Monitoramento externo</h3>
         </div>
-        <Button size="sm" variant="outline" disabled={checking} onClick={checkNow}>
+        <Button variant="secondary" disabled={checking} onClick={checkNow}>
           {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Checar agora
         </Button>

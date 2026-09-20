@@ -23,7 +23,7 @@ export function DeployLogPanel({ projectName }: Props) {
     };
     const onComplete = (d: { appName: string; success: boolean; error?: string }) => {
       if (d.appName !== projectName) return;
-      setLogs((prev) => [...prev, d.success ? '🚀 Concluído' : `❌ Falhou: ${d.error || 'erro desconhecido'}`]);
+      setLogs((prev) => [...prev, d.success ? 'Concluído' : `Falhou: ${d.error || 'erro desconhecido'}`]);
     };
 
     getConnectedSocket().then((s) => {

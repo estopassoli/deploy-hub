@@ -135,7 +135,7 @@ export function AddServiceForm({ projectId, projectName, onAdded }: Props) {
       )}
 
       {source === 'release' && (
-        <Button variant="ghost" size="sm" onClick={() => scan('repo')} disabled={scanning}>
+        <Button variant="ghost" onClick={() => scan('repo')} disabled={scanning}>
           <Search className="h-4 w-4" />
           Não achou o app? Buscar no repositório
         </Button>
@@ -184,10 +184,10 @@ export function AddServiceForm({ projectId, projectName, onAdded }: Props) {
             </Label>
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => setSelected(null)}>
+            <Button variant="secondary" onClick={() => setSelected(null)}>
               Cancelar
             </Button>
-            <Button variant="gradient" size="sm" disabled={adding} onClick={handleAdd}>
+            <Button variant="primary" disabled={adding} onClick={handleAdd}>
               {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Adicionar e deployar
             </Button>

@@ -69,7 +69,7 @@ export function showNotification(payload: NotificationPayload): Notification | n
 // Show deploy failed notification
 export function notifyDeployFailed(appName: string, error?: string): Notification | null {
   return showNotification({
-    title: '❌ Deploy Falhou',
+    title: 'Deploy falhou',
     body: error 
       ? `${appName}: ${error.substring(0, 100)}`
       : `O deploy de ${appName} falhou. Verifique os logs.`,
@@ -81,7 +81,7 @@ export function notifyDeployFailed(appName: string, error?: string): Notificatio
 // Show app stopped notification
 export function notifyAppStopped(appName: string, reason?: string): Notification | null {
   return showNotification({
-    title: '⚠️ Aplicação Parou',
+    title: 'Aplicação parou',
     body: reason 
       ? `${appName}: ${reason.substring(0, 100)}`
       : `A aplicação ${appName} parou inesperadamente.`,
@@ -93,7 +93,7 @@ export function notifyAppStopped(appName: string, reason?: string): Notification
 // Show deploy success notification
 export function notifyDeploySuccess(appName: string, version?: string): Notification | null {
   return showNotification({
-    title: '✅ Deploy Concluído',
+    title: 'Deploy concluído',
     body: version 
       ? `${appName} atualizado para versão ${version}`
       : `Deploy de ${appName} concluído com sucesso.`,

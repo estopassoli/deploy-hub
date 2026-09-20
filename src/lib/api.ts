@@ -67,10 +67,19 @@ class ApiClient {
       headers,
     });
 
-    if (response.status === 401) {
+    // 401 em /auth/* é resposta da tela, não sessão expirada.
+    //
+    // O interceptor antigo redirecionava para /login em QUALQUER 401 — inclusive no
+    // próprio POST /auth/login. Senha errada recarregava a página inteira antes de o
+    // `catch` do formulário rodar, então o erro nunca aparecia: a tela só piscava. É a
+    // razão de o painel ter 81 `toast.error` e 2 erros inline.
+    if (response.status === 401 && !endpoint.startsWith('/auth/')) {
       this.clearToken();
-      window.location.href = '/login';
-      throw new Error('Não autorizado');
+      // `replace` e não `href`: sessão expirada não deve empilhar entrada no histórico,
+      // senão o "voltar" do navegador tenta a rota protegida de novo.
+      const de = window.location.pathname + window.location.search;
+      window.location.replace(`/login?de=${encodeURIComponent(de)}`);
+      throw new Error('Sua sessão expirou. Entre de novo.');
     }
 
     if (!response.ok) {

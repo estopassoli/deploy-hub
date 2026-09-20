@@ -1,73 +1,101 @@
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap");
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Graphite + one green.
+ *
+ * Neutros grafite quase pretos, hairlines de 1px, Geist + Geist Mono, botão primário
+ * claro e UM acento emerald que só significa vivo / saudável / foco.
+ *
+ * Proibido em qualquer tela: gradiente, glow, glass, sombra colorida, blob com blur,
+ * ícone dentro de tile tintado, card com borda lateral colorida. O bloco de tokens
+ * antigo carregava todos eles, e enquanto existissem qualquer tela nova nascia fora do
+ * kit — por isso a substituição é integral, não incremental.
+ *
+ * As triplas HSL têm uma casa decimal porque #1E1E22 (line-1) e #202024 (bg-3)
+ * colapsam na mesma tripla se arredondadas para inteiros.
+ */
 @layer base {
   :root {
-    --background: 220 20% 4%;
-    --foreground: 210 40% 98%;
+    /* ── Rampa neutra grafite ─────────────────────────────────────────── */
+    --bg-0: 240 4.8% 4.1%;      /* #0A0A0B  fundo do app, painel de console        */
+    --bg-1: 240 5.6% 7.1%;      /* #111113  sidebar, card, header de tabela, input */
+    --bg-2: 240 5.9% 10%;       /* #18181B  hover de linha, chip, kbd, code        */
+    --bg-3: 240 5.9% 13.3%;     /* #202024  nav ativo, pressed, trilho de medidor  */
 
-    --card: 220 18% 7%;
-    --card-foreground: 210 40% 98%;
+    --line-1: 240 6.2% 12.5%;   /* #1E1E22  divisor entre linhas                   */
+    --line-2: 240 5.6% 17.5%;   /* #2A2A2F  borda padrão de card/input/botão       */
+    --line-3: 240 5.3% 26.1%;   /* #3F3F46  borda forte, hover de input            */
 
-    --popover: 220 18% 7%;
-    --popover-foreground: 210 40% 98%;
+    --text-1: 240 5.9% 93.3%;   /* #EDEDEF  texto primário, títulos, valores       */
+    --text-2: 240 4.9% 72%;     /* #B4B4BB  labels, secundário                     */
+    --text-3: 240 3.7% 57.3%;   /* #8E8E96  meta, placeholder, header de tabela    */
 
-    --primary: 174 72% 56%;
-    --primary-foreground: 220 20% 4%;
+    /* ── Acento e semântica ───────────────────────────────────────────── */
+    --brand: 151 65.1% 53.9%;          /* #3DD68C  running, focus ring, tab ativa  */
+    --brand-strong: 151 54.7% 41.6%;   /* #30A46C  fills sólidos                   */
+    --brand-foreground: 240 4.8% 4.1%; /* #0A0A0B  texto sobre fill emerald        */
 
-    --secondary: 220 16% 12%;
-    --secondary-foreground: 210 40% 98%;
+    --running: 151 65.1% 53.9%; /* #3DD68C */
+    --stopped: 240 3.7% 57.3%;  /* #8E8E96  dot vazado, anel de 1.5px              */
+    --errored: 358 100% 69.5%;  /* #FF6369 */
+    --building: 39 100% 57.1%;  /* #FFB224  building / deploying                   */
+    --warning: 39 100% 57.1%;   /* #FFB224  mesmo hue do building, papel diferente */
+    --info: 210 100% 72%;       /* #70B8FF  info, queued, link, dot de não lida    */
+    --docker: 253 100% 82.7%;   /* #BAA7FF  SÓ a tag de runtime docker             */
 
-    --muted: 220 14% 15%;
-    --muted-foreground: 215 20% 55%;
+    /* ── Aliases shadcn (não renomear: os primitives leem estes) ──────── */
+    --background: var(--bg-0);
+    --foreground: var(--text-1);
 
-    --accent: 174 72% 56%;
-    --accent-foreground: 220 20% 4%;
+    --card: var(--bg-1);
+    --card-foreground: var(--text-1);
+    --popover: var(--bg-1);
+    --popover-foreground: var(--text-1);
 
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 210 40% 98%;
+    /* Primário claro estilo Vercel — NÃO é a cor de marca. Um por view. */
+    --primary: 240 5.9% 93.3%;           /* #EDEDEF */
+    --primary-foreground: 240 4.8% 4.1%; /* #0A0A0B */
 
-    --success: 142 76% 36%;
-    --success-foreground: 210 40% 98%;
+    --secondary: var(--bg-2);
+    --secondary-foreground: var(--text-1);
+    --muted: var(--bg-2);
+    --muted-foreground: var(--text-3);
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 220 20% 4%;
+    /* --accent é a superfície neutra de hover do shadcn, NUNCA o emerald. */
+    --accent: var(--bg-2);
+    --accent-foreground: var(--text-1);
 
-    --border: 220 16% 14%;
-    --input: 220 16% 14%;
-    --ring: 174 72% 56%;
+    --destructive: 358 100% 69.5%;       /* #FF6369  texto e borda destrutivos     */
+    --destructive-foreground: 240 5.9% 93.3%;
+    --destructive-solid: 358 65% 47.1%;  /* #C62A2F  só dentro de AlertDialog      */
+    --destructive-solid-foreground: 0 0% 100%;
 
-    --radius: 0.75rem;
+    /* Alias legado de --running, mantido pelos ~60 usos de bg-success/text-success */
+    --success: 151 65.1% 53.9%;
+    --success-foreground: 240 4.8% 4.1%;
+    --warning-foreground: 240 4.8% 4.1%;
 
-    /* Custom tokens */
-    --glow-primary: 0 0 40px hsl(174 72% 56% / 0.2);
-    --glow-success: 0 0 20px hsl(142 76% 36% / 0.3);
-    --glow-destructive: 0 0 20px hsl(0 72% 51% / 0.3);
-    --gradient-primary: linear-gradient(
-      135deg,
-      hsl(174 72% 56%),
-      hsl(199 89% 48%)
-    );
-    --gradient-card: linear-gradient(180deg, hsl(220 18% 9%), hsl(220 18% 6%));
-    --glass-bg: hsl(220 18% 7% / 0.8);
-    --glass-border: hsl(220 16% 20% / 0.5);
+    --border: var(--line-2);
+    --input: var(--line-2);
+    --ring: var(--brand);
 
-    --sidebar-background: 220 18% 5%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 174 72% 56%;
-    --sidebar-primary-foreground: 220 20% 4%;
-    --sidebar-accent: 220 16% 12%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 220 16% 14%;
-    --sidebar-ring: 174 72% 56%;
-  }
+    --radius: 0.375rem; /* 6px — base de controles; a escala vive no tailwind.config */
 
-  .dark {
-    --background: 220 20% 4%;
-    --foreground: 210 40% 98%;
+    /* ── Sidebar (mantidos só para ui/sidebar.tsx não quebrar) ────────── */
+    --sidebar-background: var(--bg-1);
+    --sidebar-foreground: var(--text-1);
+    --sidebar-primary: var(--text-1);
+    --sidebar-primary-foreground: var(--bg-0);
+    --sidebar-accent: var(--bg-3);
+    --sidebar-accent-foreground: var(--text-1);
+    --sidebar-border: var(--line-1);
+    --sidebar-ring: var(--brand);
+
+    /* Elevação: existe SÓ em overlay (menu, popover, dialog, sheet, palette,
+       toast). Nunca em card, tabela, input ou botão. */
+    --shadow-overlay: 0 16px 48px rgb(0 0 0 / 0.55), 0 0 0 1px hsl(var(--line-2));
   }
 }
 
@@ -78,143 +106,105 @@
 
   html {
     scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-    font-family: "Outfit", system-ui, sans-serif;
+    @apply bg-bg-0 text-text-1 antialiased;
+    font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 20px;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  /* Mobile: piso de 15/22 no corpo. */
+  @media (max-width: 640px) {
+    body {
+      font-size: 15px;
+      line-height: 22px;
+    }
   }
 
   code,
   pre,
+  kbd,
+  samp,
   .font-mono {
-    font-family: "JetBrains Mono", monospace;
+    font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
   }
 
-  /* Prevent iOS zoom on input focus - must be 16px minimum */
-  @supports (-webkit-touch-callout: none) {
+  /* Evita o zoom do iOS no foco do campo: inputs 16px em touch. */
+  @media (max-width: 1024px) {
     input,
     textarea,
-    select,
-    button {
+    select {
       font-size: 16px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
     }
   }
 }
 
 @layer utilities {
-  .glass {
-    background: var(--glass-bg);
-    backdrop-filter: blur(12px);
-    border: 1px solid var(--glass-border);
+  /* Todo valor de máquina: Mono + numerais de largura fixa. */
+  .mono-num {
+    font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "zero" 1; /* zero cortado: distingue 0 de O em hash/porta */
   }
 
-  .glow-primary {
-    box-shadow: var(--glow-primary);
+  /* Célula numérica de tabela: alinhada à direita, precisão fixa por coluna. */
+  .num-cell {
+    @apply mono-num text-right;
   }
 
-  .glow-success {
-    box-shadow: var(--glow-success);
-  }
-
-  .glow-destructive {
-    box-shadow: var(--glow-destructive);
-  }
-
-  .gradient-text {
-    background: var(--gradient-primary);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .gradient-border {
-    position: relative;
-    background: var(--gradient-card);
-  }
-
-  .gradient-border::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    background: var(--gradient-primary);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box,
-      linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-  }
-
-  .animate-pulse-slow {
-    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
+  /* Scrollbar do console: log, terminal, painel de deploy. */
   .terminal-scroll::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
 
   .terminal-scroll::-webkit-scrollbar-track {
-    background: hsl(220 18% 7%);
+    background: hsl(var(--bg-1));
   }
 
   .terminal-scroll::-webkit-scrollbar-thumb {
-    background: hsl(220 16% 20%);
+    background: hsl(var(--line-2));
     border-radius: 4px;
   }
 
   .terminal-scroll::-webkit-scrollbar-thumb:hover {
-    background: hsl(220 16% 30%);
+    background: hsl(var(--line-3));
   }
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.animate-slide-in {
-  animation: slideIn 0.4s ease-out forwards;
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-out forwards;
-}
-
-.stagger-1 {
-  animation-delay: 0.05s;
-}
-.stagger-2 {
-  animation-delay: 0.1s;
-}
-.stagger-3 {
-  animation-delay: 0.15s;
-}
-.stagger-4 {
-  animation-delay: 0.2s;
-}
-.stagger-5 {
-  animation-delay: 0.25s;
 }
 
 .xterm .xterm-viewport {
   overflow-y: auto !important;
+}
+
+/*
+ * Altura de viewport que funciona no iOS.
+ *
+ * `h-screen` (100vh) inclui a barra do navegador que some ao rolar, então o shell fica
+ * mais alto que a tela e a tab bar cai para fora. `100dvh` acompanha; o `100vh` antes
+ * é o fallback para quem não suporta.
+ */
+.h-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Mesma altura, como mínimo — usada pela tela de login, que não vive no shell. */
+.min-h-viewport {
+  min-height: 100vh;
+  min-height: 100dvh;
 }

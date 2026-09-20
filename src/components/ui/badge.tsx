@@ -1,29 +1,40 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
-
 import { cn } from "@/lib/utils";
 
+/**
+ * Pílula de severidade: `Ready`, `3 stopped`, `1 errored`, `Preview`, `atual`.
+ *
+ * É uma das **duas** famílias do kit, e misturá-las foi o erro nº 4 do QA. A outra é
+ * `ds/Tag`: retângulo neutro de raio 4 com valor de máquina (framework, runtime,
+ * branch, hash). Badge é tinta semântica; Tag é neutra.
+ *
+ * Regra de conteúdo: o badge de gravidade sempre carrega **palavra e número**
+ * (`3 stopped`) — nunca uma fração colorida (`1/4 running` em âmbar), que é cor como
+ * único sinal.
+ */
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full px-2 text-2xs font-medium leading-4 max-xl:h-6 max-md:text-xs",
   {
     variants: {
-      variant: {
-        default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
-        secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        destructive: "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
-        outline: "text-foreground",
+      tone: {
+        accent: "bg-accent/12 border border-accent/28 text-accent",
+        amber: "bg-amber/12 border border-amber/28 text-amber",
+        red: "bg-red/12 border border-red/30 text-red",
+        blue: "bg-blue/12 border border-blue/28 text-blue",
+        neutral: "bg-bg-2 border border-line-2 text-text-2",
       },
     },
-    defaultVariants: {
-      variant: "default",
-    },
+    defaultVariants: { tone: "neutral" },
   },
 );
 
-export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof badgeVariants> {}
+export interface BadgeProps
+  extends React.HTMLAttributes<HTMLSpanElement>,
+    VariantProps<typeof badgeVariants> {}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return <div className={cn(badgeVariants({ variant }), className)} {...props} />;
+function Badge({ className, tone, ...props }: BadgeProps) {
+  return <span className={cn(badgeVariants({ tone }), className)} {...props} />;
 }
 
 export { Badge, badgeVariants };

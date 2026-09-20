@@ -129,13 +129,13 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" disabled={saving} onClick={handleSave}>
+          <Button variant="secondary" disabled={saving} onClick={handleSave}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Salvar
           </Button>
           <Button
-            size="sm"
-            variant="outline"
+           
+            variant="secondary"
             disabled={applying}
             onClick={handleSaveAndRestart}
             title="Reescreve o .env da release atual e reinicia só este service, sem refazer o build"
@@ -143,15 +143,15 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
             {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Salvar e reiniciar
           </Button>
-          <Button size="sm" variant="gradient" disabled={deploying} onClick={handleDeploy} title="Rebuilda e reinicia só este service">
+          <Button variant="primary" disabled={deploying} onClick={handleDeploy} title="Rebuilda e reinicia só este service">
             {deploying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
             Deploy service
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button
-                size="sm"
-                variant="outline"
+               
+                variant="secondary"
                 className="text-destructive hover:text-destructive"
                 disabled={!canRemove}
                 title={canRemove ? 'Remover service' : 'Último service — exclua o projeto inteiro'}
@@ -228,7 +228,7 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
         </div>
       </div>
       {runtime === 'docker' || (runtime === 'auto' && app.activeRuntime === 'docker') ? (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-2xs leading-4 text-text-3">
           Em Docker, o install e o build acontecem dentro da imagem — o Start command acima é
           ignorado (quem manda é o CMD do Dockerfile). O Migrate command roda num container
           descartável a partir da imagem nova, antes do app subir.

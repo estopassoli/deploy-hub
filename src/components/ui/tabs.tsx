@@ -1,8 +1,14 @@
 import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
-
 import { cn } from "@/lib/utils";
 
+/**
+ * Abas sublinhadas.
+ *
+ * A pílula `bg-muted p-1` de antes competia com o botão primário pela atenção e
+ * escondia que abas são navegação, não ação. Aqui a aba ativa é um sublinhado de 2px
+ * em accent — o mesmo emerald que significa "selecionado" no resto do produto.
+ */
 const Tabs = TabsPrimitive.Root;
 
 const TabsList = React.forwardRef<
@@ -12,7 +18,8 @@ const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      "inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground",
+      "flex h-10 items-stretch gap-5 border-b border-line-1 bg-transparent p-0",
+      "max-xl:h-11 max-md:gap-4 max-md:overflow-x-auto",
       className,
     )}
     {...props}
@@ -27,7 +34,11 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+      "flex h-10 shrink-0 items-center gap-1.5 border-b-2 border-transparent px-0.5 text-[13px] font-medium leading-5 text-text-3 transition-colors",
+      "hover:text-text-2",
+      "data-[state=active]:border-accent data-[state=active]:text-text-1",
+      "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-accent/[0.18]",
+      "max-xl:h-11 max-md:text-[15px]",
       className,
     )}
     {...props}
@@ -41,10 +52,7 @@ const TabsContent = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.Content
     ref={ref}
-    className={cn(
-      "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-      className,
-    )}
+    className={cn("mt-6 focus-visible:outline-none", className)}
     {...props}
   />
 ));

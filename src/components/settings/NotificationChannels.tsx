@@ -166,7 +166,7 @@ export function NotificationChannels() {
           </p>
           {settings.telegramConfigured && (
             <Button
-              size="sm"
+             
               variant="ghost"
               className="text-destructive hover:text-destructive"
               disabled={saving}
@@ -201,11 +201,11 @@ export function NotificationChannels() {
       </div>
 
       <div className="flex flex-wrap justify-end gap-2">
-        <Button variant="outline" size="sm" disabled={testing} onClick={testar}>
+        <Button variant="secondary" disabled={testing} onClick={testar}>
           {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Enviar teste
         </Button>
-        <Button variant="gradient" size="sm" disabled={saving} onClick={salvar}>
+        <Button variant="primary" disabled={saving} onClick={salvar}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           Salvar notificações
         </Button>
@@ -263,7 +263,7 @@ function Canal({
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">{ajuda}</p>
         {configurado && (
-          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={disabled} onClick={onRemover}>
+          <Button variant="ghost" className="text-destructive hover:text-destructive" disabled={disabled} onClick={onRemover}>
             Remover
           </Button>
         )}

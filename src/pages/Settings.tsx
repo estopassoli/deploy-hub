@@ -1,383 +1,448 @@
-import { Layout } from '@/components/layout/Layout';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
+import api from '@/lib/api';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { Callout, PageHeader, Tag } from '@/components/ds';
 import { NotificationSettings } from '@/components/NotificationSettings';
 import { NotificationChannels } from '@/components/settings/NotificationChannels';
 import { BackupSettings } from '@/components/settings/BackupSettings';
 import { PreviewSettings } from '@/components/settings/PreviewSettings';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
-import { Switch } from '@/components/ui/switch';
-import { api } from '@/lib/api';
-import {
-  Bell,
-  Database,
-  GitBranch,
-  Loader2,
-  Mail,
-  RefreshCw,
-  Save,
-  Server,
-  Trash2
-} from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { ConfirmDeleteDialog } from '@/components/apps/ConfirmDeleteDialog';
 
-/** URL da API em uso, para a seção de servidor mostrar o que está valendo. */
+/**
+ * Configurações.
+ *
+ * ## A regra que organiza a tela inteira
+ *
+ * **Todo controle ou salva de verdade, ou está desabilitado com o motivo escrito.**
+ *
+ * O "Save Changes" global de antes era placebo: mostrava sucesso e não gravava nada —
+ * nem o e-mail. Havia seis botões sem handler, campos de IP e porta que pareciam
+ * editáveis mas vinham do `.env` do servidor, e um "Test Connection" que respondia
+ * sucesso sem testar coisa alguma.
+ *
+ * Cada linha agora declara **de onde vem o valor** (`env PORT`, `fixo no código`,
+ * `servidor`, `neste navegador`), e o que não tem endpoint carrega o selo `em breve`
+ * com a frase explicando. Um controle desenhado e desabilitado é honesto; um botão que
+ * só dispara um toast de sucesso é mentira.
+ */
+const SECOES = [
+  { id: 'servidor', label: 'Servidor' },
+  { id: 'retencao', label: 'Retenção' },
+  { id: 'notificacoes', label: 'Notificações' },
+  { id: 'backup', label: 'Backup' },
+  { id: 'preview', label: 'Preview' },
+  { id: 'perigo', label: 'Zona de perigo' },
+];
+
 const apiBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:10001/api').trim();
 
 export default function Settings() {
-  // Retenção e limpeza automática agora são persistidas de verdade, na tabela Setting,
-  // e lidas pelo cron de limpeza. Antes eram estado local que o "Save" só transformava
-  // num toast de sucesso, enquanto o servidor seguia com RETENTION_DAYS = 30 fixo.
-  const [general, setGeneral] = useState({ retentionDays: 30, autoCleanup: true });
-  const [loadingGeneral, setLoadingGeneral] = useState(true);
-  const [savingGeneral, setSavingGeneral] = useState(false);
+  const [geral, setGeral] = useState<{ retentionDays: number; autoCleanup: boolean } | null>(null);
+  const [geralBase, setGeralBase] = useState<typeof geral>(null);
+  const [salvandoGeral, setSalvandoGeral] = useState(false);
 
-  const [emailSettings, setEmailSettings] = useState({
-    emailEnabled: false,
-    emailRecipient: '',
+  const [email, setEmail] = useState<{ emailEnabled: boolean; emailRecipient: string } | null>(null);
+  const [emailBase, setEmailBase] = useState<typeof email>(null);
+  const [salvandoEmail, setSalvandoEmail] = useState(false);
+
+  const [teste, setTeste] = useState<{ estado: 'nunca' | 'testando' | 'ok' | 'falhou'; detalhe?: string }>({
+    estado: 'nunca',
   });
-
-  const [loadingEmail, setLoadingEmail] = useState(true);
-  const [savingEmail, setSavingEmail] = useState(false);
-  const [testingConnection, setTestingConnection] = useState(false);
+  const [limpando, setLimpando] = useState(false);
+  const [secaoAtiva, setSecaoAtiva] = useState('servidor');
+  const mainRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    loadEmailSettings();
-    loadGeneralSettings();
+    // Falha ao carregar não pode virar "sobrescrever a config real com defaults":
+    // enquanto não há dado, a seção mostra esqueleto, não um formulário zerado.
+    api
+      .getGeneralSettings()
+      .then((d) => {
+        setGeral(d);
+        setGeralBase(d);
+      })
+      .catch((e: any) => toast.error(e?.message || 'Não foi possível carregar a retenção'));
+
+    api
+      .getSettings()
+      .then((d) => {
+        const valor = { emailEnabled: d.emailEnabled, emailRecipient: d.emailRecipient || '' };
+        setEmail(valor);
+        setEmailBase(valor);
+      })
+      .catch((e: any) => toast.error(e?.message || 'Não foi possível carregar o e-mail'));
   }, []);
 
-  const loadEmailSettings = async () => {
-    try {
-      const data = await api.getSettings();
-      setEmailSettings({
-        emailEnabled: data.emailEnabled,
-        emailRecipient: data.emailRecipient || '',
-      });
-    } catch (error) {
-      console.error('Failed to load email settings:', error);
-    } finally {
-      setLoadingEmail(false);
-    }
-  };
+  const geralSujo = useMemo(
+    () => Boolean(geral && geralBase && (geral.retentionDays !== geralBase.retentionDays || geral.autoCleanup !== geralBase.autoCleanup)),
+    [geral, geralBase],
+  );
+  const emailSujo = useMemo(
+    () => Boolean(email && emailBase && (email.emailEnabled !== emailBase.emailEnabled || email.emailRecipient !== emailBase.emailRecipient)),
+    [email, emailBase],
+  );
 
-  const loadGeneralSettings = async () => {
-    try {
-      setGeneral(await api.getGeneralSettings());
-    } catch (error) {
-      console.error('Falha ao carregar configurações gerais:', error);
-    } finally {
-      setLoadingGeneral(false);
-    }
-  };
-
-  const handleSaveGeneral = async () => {
-    setSavingGeneral(true);
-    try {
-      const saved = await api.updateGeneralSettings(general);
-      setGeneral(saved);
-      toast.success(
-        saved.autoCleanup
-          ? `Limpeza automática ligada, mantendo ${saved.retentionDays} dias de releases e logs.`
-          : 'Limpeza automática desligada — nenhuma release será removida.',
-      );
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao salvar configurações');
-    } finally {
-      setSavingGeneral(false);
-    }
-  };
-
-  const handleSaveEmailSettings = async () => {
-    if (emailSettings.emailEnabled && !emailSettings.emailRecipient) {
-      toast.error('Informe o email de destino para ativar notificações');
-      return;
-    }
-
-    setSavingEmail(true);
-    try {
-      await api.updateEmailSettings({
-        emailEnabled: emailSettings.emailEnabled,
-        emailRecipient: emailSettings.emailRecipient || undefined,
-      });
-      toast.success('Configurações de email salvas');
-    } catch (error) {
-      toast.error('Erro ao salvar configurações de email');
-    } finally {
-      setSavingEmail(false);
-    }
-  };
-
-  const [clearingLogs, setClearingLogs] = useState(false);
-
-  const handleClearLogs = async () => {
-    setClearingLogs(true);
-    try {
-      const { removed } = await api.clearSystemLogs();
-      toast.success(`${removed} registro(s) removido(s)`);
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao limpar logs');
-    } finally {
-      setClearingLogs(false);
-    }
-  };
-
-  /** Bate de verdade no /api/system/health em vez de só mostrar um toast. */
-  const handleTestConnection = async () => {
-    setTestingConnection(true);
-    try {
-      const health = await api.healthCheck();
-      toast.success(`Backend respondeu: ${health.status}`);
-    } catch (error: any) {
-      toast.error(error.message || 'Backend não respondeu');
-    } finally {
-      setTestingConnection(false);
-    }
+  const irPara = (id: string) => {
+    setSecaoAtiva(id);
+    document.getElementById(`secao-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
-    <Layout>
-      <div className="mx-auto max-w-3xl">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Configurações</h1>
-          <p className="mt-1 text-muted-foreground">
-            Configurações do seu DeployHub
-          </p>
-        </div>
+    <div ref={mainRef} className="flex max-w-180 flex-col gap-5">
+      <PageHeader
+        title="Configurações"
+        meta={
+          <>
+            <span>Cada linha diz de onde vem o valor</span>
+            <span aria-hidden>·</span>
+            <span>{geralSujo || emailSujo ? 'alterações pendentes' : 'sem alterações pendentes'}</span>
+          </>
+        }
+      />
 
-        <div className="space-y-8">
-          {/* Server Configuration */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <div className="flex items-center gap-2 mb-6">
-              <Server className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-foreground">Servidor</h3>
-            </div>
-
-            {/*
-              Estes valores vivem no `backend/.env` e no vhost do Nginx: mudá-los por
-              aqui exigiria o painel reescrever a própria configuração e se reiniciar.
-              Os campos editáveis que existiam aqui nunca fizeram nada — o "Save" só
-              exibia um toast. Viraram somente-leitura, mostrando o que está em uso.
-            */}
-            <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label className="text-muted-foreground">API em uso</Label>
-                  <p className="font-mono text-sm text-foreground break-all">{apiBaseUrl}</p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-muted-foreground">Diretório dos apps</Label>
-                  <p className="font-mono text-sm text-foreground">
-                    definido por <span className="text-primary">APPS_DIR</span> em backend/.env
-                  </p>
-                </div>
-              </div>
-
-              <p className="text-xs text-muted-foreground">
-                Porta da API, diretório dos apps e domínios são configurados em
-                <span className="font-mono text-foreground"> backend/.env</span> e no Nginx,
-                aplicados no próximo restart do serviço.
-              </p>
-
-              <Button variant="outline" onClick={handleTestConnection} disabled={testingConnection}>
-                {testingConnection ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                Testar conexão
-              </Button>
-            </div>
-          </div>
-
-          {/* Retention Settings */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <div className="flex items-center gap-2 mb-6">
-              <Database className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-foreground">Retenção de releases</h3>
-            </div>
-
-            {loadingGeneral ? (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Carregando...
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="retentionDays">Período de retenção (dias)</Label>
-                  <Input
-                    id="retentionDays"
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={general.retentionDays}
-                    onChange={(e) =>
-                      setGeneral({ ...general, retentionDays: parseInt(e.target.value, 10) || 0 })
-                    }
-                    className="w-32 font-mono"
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Releases e logs de sistema mais antigos que isso são removidos pela limpeza
-                    diária. A release ativa nunca é apagada, independente da idade.
-                  </p>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium text-foreground">Limpeza automática</p>
-                    <p className="text-sm text-muted-foreground">
-                      Roda todo dia às 3h (releases) e 4h (logs). Desligado, nada é removido e o
-                      disco cresce indefinidamente.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={general.autoCleanup}
-                    onCheckedChange={(checked) => setGeneral({ ...general, autoCleanup: checked })}
-                  />
-                </div>
-
-                <div className="flex justify-end">
-                  <Button variant="gradient" size="sm" disabled={savingGeneral} onClick={handleSaveGeneral}>
-                    {savingGeneral ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    Salvar retenção
-                  </Button>
-                </div>
-              </div>
+      <nav
+        aria-label="Seções"
+        className="sticky top-0 z-10 -mx-1 flex gap-1 overflow-x-auto border-b border-line-1 bg-bg-0 px-1 pb-2"
+      >
+        {SECOES.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            aria-current={secaoAtiva === s.id ? 'true' : undefined}
+            onClick={() => irPara(s.id)}
+            className={cn(
+              'flex h-7 shrink-0 items-center rounded-md px-2.5 text-xs font-medium transition-colors max-xl:h-10 max-xl:text-[13px]',
+              secaoAtiva === s.id ? 'bg-bg-3 text-text-1' : 'text-text-2 hover:bg-bg-2 hover:text-text-1',
             )}
+          >
+            {s.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* ---------------- Servidor ---------------- */}
+      <Secao id="servidor" titulo="Servidor">
+        <Linha label="API em uso" origem="env VITE_API_URL">
+          <span className="font-mono tabular-nums text-xs text-text-1 break-all">{apiBaseUrl}</span>
+        </Linha>
+
+        <Linha label="Diretório dos apps" origem="env APPS_DIR">
+          <span className="font-mono tabular-nums text-xs text-text-2">
+            definido em backend/.env — sem edição pelo painel
+          </span>
+        </Linha>
+
+        <Linha label="Porta da API" origem="env PORT">
+          <span className="font-mono tabular-nums text-xs text-text-2">
+            definida em backend/.env e aplicada no restart do serviço
+          </span>
+        </Linha>
+
+        <Linha
+          label="Testar conexão"
+          origem="servidor"
+          hint="Bate em GET /system/health de verdade — antes esta linha respondia sucesso sem testar nada."
+        >
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              aria-busy={teste.estado === 'testando' ? 'true' : undefined}
+              onClick={async () => {
+                setTeste({ estado: 'testando' });
+                const t0 = performance.now();
+                try {
+                  const saude = await api.healthCheck();
+                  setTeste({
+                    estado: 'ok',
+                    detalhe: `${saude.status} · ${Math.round(performance.now() - t0)} ms`,
+                  });
+                } catch (e: any) {
+                  setTeste({ estado: 'falhou', detalhe: e?.message || 'sem resposta' });
+                }
+              }}
+            >
+              {teste.estado === 'testando' ? <Loader2 className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}
+              Testar
+            </Button>
+            <span
+              className={cn(
+                'font-mono tabular-nums text-xs',
+                teste.estado === 'ok' ? 'text-accent' : teste.estado === 'falhou' ? 'text-red' : 'text-text-3',
+              )}
+            >
+              {teste.estado === 'nunca' ? 'nunca testado' : teste.detalhe ?? 'testando…'}
+            </span>
           </div>
+        </Linha>
+      </Secao>
 
-          {/* Notifications */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <div className="flex items-center gap-2 mb-6">
-              <Bell className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-foreground">Notifications</h3>
-            </div>
-            
-            <div className="space-y-4">
-              <NotificationSettings />
+      {/* ---------------- Retenção ---------------- */}
+      <Secao id="retencao" titulo="Retenção de releases e logs">
+        {!geral ? (
+          <Skeleton className="h-24 w-full" />
+        ) : (
+          <>
+            <Callout tone="amber" title="O agendamento é fixo no servidor">
+              Releases mais antigas que o prazo são apagadas do disco com{' '}
+              <span className="font-mono">rm -rf</span>. A limpeza roda às 03:00 (releases) e 04:00
+              (logs). Mudar o número aqui altera o **prazo**, não o horário — o cron está fixo no
+              código do servidor.
+            </Callout>
 
-              <Separator />
-
-              {/* Slack, Discord, Telegram e os eventos que disparam cada um. */}
-              <NotificationChannels />
-
-              <Separator />
-
-              {/* Email Notifications Section */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-primary" />
-                  <p className="font-medium text-foreground">Email Notifications</p>
-                </div>
-                
-                {loadingEmail ? (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Carregando...
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-foreground">Ativar notificações por email</p>
-                        <p className="text-xs text-muted-foreground">
-                          Receba alertas de deploy e aplicações paradas
-                        </p>
-                      </div>
-                      <Switch
-                        checked={emailSettings.emailEnabled}
-                        onCheckedChange={(checked) => 
-                          setEmailSettings({ ...emailSettings, emailEnabled: checked })
-                        }
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="emailRecipient">Email de destino</Label>
-                      <Input
-                        id="emailRecipient"
-                        type="email"
-                        placeholder="seu@email.com"
-                        value={emailSettings.emailRecipient}
-                        onChange={(e) => 
-                          setEmailSettings({ ...emailSettings, emailRecipient: e.target.value })
-                        }
-                        className="font-mono"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Notificações serão enviadas para este endereço
-                      </p>
-                    </div>
-
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={handleSaveEmailSettings}
-                      disabled={savingEmail}
-                    >
-                      {savingEmail ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Save className="h-4 w-4" />
-                      )}
-                      Salvar Email
-                    </Button>
-                  </>
-                )}
+            <Linha label="Manter releases por" origem="servidor">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={geral.retentionDays}
+                  onChange={(e) => setGeral({ ...geral, retentionDays: parseInt(e.target.value, 10) || 0 })}
+                  aria-label="Dias de retenção"
+                  className="w-24 font-mono tabular-nums"
+                />
+                <span className="text-[13px] text-text-3">dias</span>
               </div>
+            </Linha>
 
-            </div>
-          </div>
+            <Linha
+              label="Limpeza automática"
+              origem="servidor"
+              hint="Desligada, nenhuma release é removida e o disco cresce até encher."
+            >
+              <Switch
+                checked={geral.autoCleanup}
+                aria-label="Limpeza automática"
+                onCheckedChange={(v) => setGeral({ ...geral, autoCleanup: v })}
+              />
+            </Linha>
 
-          {/* Backup agendado */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <div className="flex items-center gap-2 mb-6">
-              <Database className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-foreground">Backup</h3>
-            </div>
-            <BackupSettings />
-          </div>
+            <BarraSecao
+              sujo={geralSujo}
+              salvando={salvandoGeral}
+              onDescartar={() => setGeral(geralBase)}
+              onSalvar={async () => {
+                setSalvandoGeral(true);
+                try {
+                  const salvo = await api.updateGeneralSettings(geral);
+                  setGeral(salvo);
+                  setGeralBase(salvo);
+                  toast.success(
+                    salvo.autoCleanup
+                      ? `Limpeza ligada, mantendo ${salvo.retentionDays} dias.`
+                      : 'Limpeza automática desligada — nenhuma release será removida.',
+                  );
+                } catch (e: any) {
+                  toast.error(e?.message || 'Não foi possível salvar');
+                } finally {
+                  setSalvandoGeral(false);
+                }
+              }}
+            />
+          </>
+        )}
+      </Secao>
 
-          {/* Preview por branch */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <div className="flex items-center gap-2 mb-6">
-              <GitBranch className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-foreground">Preview por branch</h3>
-            </div>
-            <PreviewSettings />
-          </div>
+      {/* ---------------- Notificações ---------------- */}
+      <Secao id="notificacoes" titulo="Notificações">
+        <Linha
+          label="Push do navegador"
+          origem="neste navegador"
+          hint="A permissão é do navegador, não da conta: ligar aqui não afeta quem abre o painel de outro aparelho."
+        >
+          <NotificationSettings />
+        </Linha>
 
-          {/*
-            Removidos daqui: "Change Password", "Regenerate API Keys", "Download SSH
-            Keys", "Reset Configuration" e o "Save Changes" global. Nenhum deles tinha
-            backend — eram botões que não faziam nada. Cada seção agora salva a si
-            mesma, e o que sobrou na tela funciona de verdade.
-          */}
+        {!email ? (
+          <Skeleton className="h-20 w-full" />
+        ) : (
+          <>
+            <Linha label="E-mail" origem="servidor">
+              <Switch
+                checked={email.emailEnabled}
+                aria-label="Notificações por e-mail"
+                onCheckedChange={(v) => setEmail({ ...email, emailEnabled: v })}
+              />
+            </Linha>
 
-          {/* Zona de perigo */}
-          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6">
-            <div className="flex items-center gap-2 mb-6">
-              <Trash2 className="h-5 w-5 text-destructive" />
-              <h3 className="font-semibold text-destructive">Zona de perigo</h3>
-            </div>
+            <Linha label="Destinatário" origem="servidor">
+              <Input
+                type="email"
+                value={email.emailRecipient}
+                onChange={(e) => setEmail({ ...email, emailRecipient: e.target.value })}
+                placeholder="voce@dominio.com"
+                aria-label="E-mail de destino"
+                className="max-w-80 font-mono tabular-nums text-[12.5px]"
+              />
+            </Linha>
 
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="font-medium text-foreground">Limpar histórico de logs</p>
-                <p className="text-sm text-muted-foreground">
-                  Apaga todos os registros de atividade do sistema. Deploys, releases e métricas
-                  não são afetados.
-                </p>
-              </div>
-              <Button variant="destructive" size="sm" disabled={clearingLogs} onClick={handleClearLogs}>
-                {clearingLogs ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            <BarraSecao
+              sujo={emailSujo}
+              salvando={salvandoEmail}
+              onDescartar={() => setEmail(emailBase)}
+              onSalvar={async () => {
+                if (email.emailEnabled && !email.emailRecipient) {
+                  toast.error('Informe o e-mail de destino para ativar');
+                  return;
+                }
+                setSalvandoEmail(true);
+                try {
+                  await api.updateEmailSettings({
+                    emailEnabled: email.emailEnabled,
+                    emailRecipient: email.emailRecipient || undefined,
+                  });
+                  setEmailBase(email);
+                  toast.success('Configurações de e-mail salvas');
+                } catch (e: any) {
+                  toast.error(e?.message || 'Não foi possível salvar');
+                } finally {
+                  setSalvandoEmail(false);
+                }
+              }}
+            />
+          </>
+        )}
+
+        <div className="pt-2">
+          <NotificationChannels />
+        </div>
+      </Secao>
+
+      {/* ---------------- Backup ---------------- */}
+      <Secao id="backup" titulo="Backup">
+        <BackupSettings />
+      </Secao>
+
+      {/* ---------------- Preview ---------------- */}
+      <Secao id="preview" titulo="Preview por branch">
+        <PreviewSettings />
+      </Secao>
+
+      {/* ---------------- Zona de perigo ---------------- */}
+      <Secao id="perigo" titulo="Zona de perigo">
+        <Callout tone="red" title="Estas ações não têm desfazer">
+          O painel não guarda cópia do que é removido aqui.
+        </Callout>
+
+        <Linha
+          label="Limpar histórico de logs"
+          origem="servidor"
+          hint="Apaga os registros de atividade. Deploys, releases e métricas não são afetados."
+        >
+          <ConfirmDeleteDialog
+            name="histórico de logs"
+            title="Limpar o histórico de logs?"
+            description={<p>Todos os registros de atividade do sistema serão apagados.</p>}
+            confirmLabel="Limpar logs"
+            onConfirm={async () => {
+              setLimpando(true);
+              try {
+                const { removed } = await api.clearSystemLogs();
+                toast.success(`${removed} registro(s) removido(s)`);
+              } finally {
+                setLimpando(false);
+              }
+            }}
+            trigger={
+              <Button variant="destructive" aria-busy={limpando ? 'true' : undefined}>
+                <Trash2 aria-hidden />
                 Limpar logs
               </Button>
-            </div>
-          </div>
-        </div>
+            }
+          />
+        </Linha>
+
+        <Linha
+          label="Trocar senha"
+          origem="em breve"
+          hint="O controle está desenhado, mas ainda não existe endpoint para ele no backend."
+        >
+          <Button variant="secondary" disabled>
+            Trocar senha
+          </Button>
+        </Linha>
+      </Secao>
+    </div>
+  );
+}
+
+function Secao({ id, titulo, children }: { id: string; titulo: string; children: React.ReactNode }) {
+  return (
+    <section id={`secao-${id}`} aria-labelledby={`h-${id}`} className="flex scroll-mt-14 flex-col gap-3">
+      <h2 id={`h-${id}`} className="m-0 text-sm font-semibold leading-5 tracking-[-0.005em] text-text-1">
+        {titulo}
+      </h2>
+      <div className="flex flex-col gap-3 rounded-[8px] border border-line-2 bg-bg-1 p-4 max-md:p-3.5">{children}</div>
+    </section>
+  );
+}
+
+/**
+ * Linha rótulo/controle com a **origem do valor**.
+ *
+ * O selo de origem é o que impede o retorno do defeito central da tela antiga: campos
+ * que pareciam editáveis mas cujo valor real vinha do `.env` do servidor.
+ */
+function Linha({
+  label,
+  origem,
+  hint,
+  children,
+}: {
+  label: string;
+  origem: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid items-start gap-x-4 gap-y-2 border-b border-line-1 pb-3 last:border-0 last:pb-0 @[640px]:grid-cols-[minmax(0,240px)_minmax(0,1fr)]">
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <Label className="text-[13px] text-text-1">{label}</Label>
+          {origem === 'em breve' ? (
+            <Badge tone="neutral">em breve</Badge>
+          ) : (
+            <Tag>{origem}</Tag>
+          )}
+        </span>
+        {hint && <p className="m-0 text-xs leading-4 text-text-3">{hint}</p>}
       </div>
-    </Layout>
+      <div className="flex min-w-0 items-center">{children}</div>
+    </div>
+  );
+}
+
+/** Um Salvar por seção, com o estado pendente visível. */
+function BarraSecao({
+  sujo,
+  salvando,
+  onDescartar,
+  onSalvar,
+}: {
+  sujo: boolean;
+  salvando: boolean;
+  onDescartar: () => void;
+  onSalvar: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-2 pt-1">
+      {sujo && <span className="mr-auto text-xs text-text-3">Alterações não salvas</span>}
+      {sujo && (
+        <Button variant="ghost" onClick={onDescartar} disabled={salvando}>
+          Descartar
+        </Button>
+      )}
+      <Button variant="primary" onClick={onSalvar} disabled={!sujo || salvando} aria-busy={salvando ? 'true' : undefined}>
+        {salvando && <Loader2 className="animate-spin" aria-hidden />}
+        {salvando ? 'Salvando…' : 'Salvar'}
+      </Button>
+    </div>
   );
 }

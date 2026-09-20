@@ -45,7 +45,7 @@ export function NotificationSettings({ compact = false, className }: Notificatio
       return (
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="icon"
           onClick={handleEnableNotifications}
           className={cn('text-muted-foreground hover:text-foreground', className)}
           title="Habilitar notificações"
@@ -58,7 +58,7 @@ export function NotificationSettings({ compact = false, className }: Notificatio
     return (
       <Button
         variant="ghost"
-        size="icon-sm"
+        size="icon"
         onClick={() => toggleNotifications(!isEnabled)}
         className={cn(
           isEnabled ? 'text-primary' : 'text-muted-foreground',
@@ -88,8 +88,8 @@ export function NotificationSettings({ compact = false, className }: Notificatio
           />
         ) : (
           <Button
-            variant="outline"
-            size="sm"
+            variant="secondary"
+           
             onClick={handleEnableNotifications}
             className="gap-2"
           >

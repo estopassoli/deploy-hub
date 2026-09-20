@@ -228,6 +228,13 @@ export function DeployLogSheet({ open, onOpenChange, deployKey, title, onFinishe
                 <span
                   className={cn(
                     'break-all',
+                    /*
+                     * Estes prefixos vêm do BACKEND, que ainda emite emoji nas linhas
+                     * de deploy. O kit não usa emoji como vocabulário — nível é
+                     * LevelTag. Enquanto o servidor não parar de emitir, a detecção
+                     * aqui é o que dá cor à linha; remover isto sem mudar o backend
+                     * deixaria a saída monocromática.
+                     */
                     line.message.startsWith('✓') && 'text-success',
                     line.message.startsWith('▶') && 'text-primary',
                     line.message.startsWith('🚀') && 'font-bold text-primary',
@@ -247,7 +254,7 @@ export function DeployLogSheet({ open, onOpenChange, deployKey, title, onFinishe
         <div className="flex justify-end gap-2">
           {!finished && (
             <Button
-              variant="outline"
+              variant="secondary"
               className="text-destructive hover:text-destructive"
               disabled={cancelling}
               onClick={handleCancel}
@@ -256,7 +263,7 @@ export function DeployLogSheet({ open, onOpenChange, deployKey, title, onFinishe
               Cancelar deploy
             </Button>
           )}
-          <Button variant={finished?.success ? 'default' : 'outline'} onClick={() => onOpenChange(false)}>
+          <Button variant={finished?.success ? 'primary' : 'secondary'} onClick={() => onOpenChange(false)}>
             Fechar
           </Button>
         </div>
