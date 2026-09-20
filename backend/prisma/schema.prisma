@@ -162,6 +162,29 @@ model AppMetric {
   @@index([appId, createdAt])
 }
 
+// Trilha de auditoria: quem fez o quê, quando e de onde.
+//
+// Guarda apenas metadados. Valores de variáveis de ambiente, tokens e webhooks NUNCA
+// entram aqui — só os NOMES das chaves alteradas. Um log de auditoria que guarda
+// segredos vira, ele mesmo, o alvo mais valioso do sistema.
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  userEmail  String?
+  action     String   // deploy.create, app.delete, env.update, terminal.open, ...
+  targetType String?  // app | project | system | terminal
+  targetId   String?
+  targetName String?
+  metadata   String?  // JSON já redigido
+  ip         String?
+  success    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action, createdAt])
+  @@index([targetId, createdAt])
+}
+
 model Setting {
   id    String @id @default(uuid())
   key   String @unique

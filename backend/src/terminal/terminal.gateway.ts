@@ -8,6 +8,7 @@ import {
 import { IPty, spawn } from 'node-pty';
 import { Server, Socket } from 'socket.io';
 import { getSocketUser } from '../auth/auth-tokens';
+import { AuditService } from '../audit/audit.service';
 
 // O CORS e a autenticação do handshake vêm do AuthenticatedIoAdapter (main.ts), que
 // cobre os três gateways de uma vez. Um socket sem JWT válido nunca chega aqui.
@@ -15,6 +16,11 @@ import { getSocketUser } from '../auth/auth-tokens';
 export class TerminalGateway {
   @WebSocketServer()
   server: Server;
+
+  // O terminal dá shell no usuário do backend — root, na instalação padrão. É a ação
+  // mais sensível do painel e a que menos deixa rastro: os comandos digitados ficam
+  // só no histórico do shell. Registrar quem abriu e quando é o mínimo.
+  constructor(private audit: AuditService) {}
 
   private terminals: Map<string, IPty> = new Map();
   /** userId -> clientId do terminal vivo desse usuário. Um terminal por usuário. */
@@ -61,6 +67,15 @@ export class TerminalGateway {
 
     this.terminals.set(client.id, ptyProcess);
     this.terminalOwners.set(user.userId, client.id);
+
+    void this.audit.record({
+      userId: user.userId,
+      userEmail: user.email,
+      action: 'terminal.open',
+      targetType: 'terminal',
+      ip: client.handshake.address,
+      metadata: { shell, cols, rows },
+    });
 
     ptyProcess.onData((data) => {
       client.emit('terminal:data', data);

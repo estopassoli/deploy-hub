@@ -2,6 +2,8 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { AuditInterceptor } from './audit/audit.interceptor';
+import { AuditService } from './audit/audit.service';
 import { AuthenticatedIoAdapter } from './auth/ws-auth.adapter';
 import { MissingEnvVarError, isPermissiveCors, parseCorsOrigins } from './config/env';
 
@@ -46,6 +48,11 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Trilha de auditoria de tudo que altera estado. Global de propósito: auditoria que
+  // depende de alguém lembrar de chamar o serviço fica incompleta na primeira feature
+  // nova, e uma trilha com buracos dá falsa sensação de cobertura.
+  app.useGlobalInterceptors(new AuditInterceptor(app.get(AuditService)));
 
   app.setGlobalPrefix('api');
 

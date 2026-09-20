@@ -306,6 +306,37 @@ class ApiClient {
     });
   }
 
+  // Auditoria
+  /** Trilha de auditoria. O servidor nunca devolve valores de variáveis nem segredos. */
+  async getAuditLog(params: { limit?: number; cursor?: string; action?: string; targetId?: string; userEmail?: string } = {}) {
+    const query = new URLSearchParams();
+    if (params.limit) query.set('limit', String(params.limit));
+    if (params.cursor) query.set('cursor', params.cursor);
+    if (params.action) query.set('action', params.action);
+    if (params.targetId) query.set('targetId', params.targetId);
+    if (params.userEmail) query.set('userEmail', params.userEmail);
+
+    return this.request<{
+      entries: Array<{
+        id: string;
+        userEmail: string | null;
+        action: string;
+        targetType: string | null;
+        targetId: string | null;
+        targetName: string | null;
+        metadata: Record<string, unknown> | null;
+        ip: string | null;
+        success: boolean;
+        createdAt: string;
+      }>;
+      nextCursor: string | null;
+    }>(`/audit?${query}`);
+  }
+
+  async getAuditActions() {
+    return this.request<string[]>('/audit/actions');
+  }
+
   // Uptime e SSL
   /** Disponibilidade do domínio e validade do certificado. */
   async getUptime(appId: string, hours = 24) {

@@ -12,6 +12,7 @@ import {
   Rocket,
   ScrollText,
   Settings,
+  ShieldCheck,
   Terminal
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
@@ -21,10 +22,11 @@ const navigation = [
   { name: 'Deploy', href: '/deploy', icon: Rocket },
   { name: 'Monorepo', href: '/projects/new', icon: Boxes },
   { name: 'Logs', href: '/logs', icon: ScrollText },
-  { name: 'Versions', href: '/versions', icon: History },
+  { name: 'Versões', href: '/versions', icon: History },
   { name: 'Terminal', href: '/terminal', icon: Terminal },
   { name: 'GitHub Actions', href: '/github', icon: Github },
-  { name: 'Settings', href: '/settings', icon: Settings },
+  { name: 'Auditoria', href: '/audit', icon: ShieldCheck },
+  { name: 'Configurações', href: '/settings', icon: Settings },
 ];
 
 interface SidebarProps {

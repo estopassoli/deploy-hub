@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppsModule } from './apps/apps.module';
+import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { DeployModule } from './deploy/deploy.module';
 import { EmailModule } from './email/email.module';
@@ -18,6 +19,7 @@ import { WebhookModule } from './webhook/webhook.module';
   imports: [
     ScheduleModule.forRoot(),
     PrismaModule,
+    AuditModule,
     AuthModule,
     AppsModule,
     DeployModule,
