@@ -90,6 +90,19 @@ export default function Deploy() {
   const [deployResult, setDeployResult] = useState<DeployResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [cancelling, setCancelling] = useState(false);
+  // Os tipos vêm do registro de presets no backend: adicionar um framework lá aparece
+  // aqui sozinho, sem tocar no frontend.
+  const [presets, setPresets] = useState<Array<{ id: string; label: string; description: string; kind: string }>>([]);
+
+  useEffect(() => {
+    api
+      .getAppPresets()
+      .then(setPresets)
+      .catch(() => {
+        // Sem a lista, o select fica vazio e o deploy não segue — melhor avisar.
+        toast.error('Não foi possível carregar os tipos de aplicação');
+      });
+  }, []);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const deployCompletionRef = useRef(false);
 
@@ -242,7 +255,7 @@ export default function Deploy() {
         name: formData.name,
         port: parseInt(formData.port),
         domain: formData.domain || undefined,
-        type: formData.type as 'nestjs' | 'nextjs' | 'vitejs',
+        type: formData.type,
         branch: formData.branch,
         installCommand: formData.installCommand || undefined,
         buildCommand: formData.buildCommand || undefined,
@@ -467,24 +480,21 @@ export default function Deploy() {
                     <SelectValue placeholder="Selecione o tipo" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="nextjs">
-                      <div className="flex items-center gap-2">
-                        <div className="h-3 w-3 rounded-sm bg-foreground" />
-                        Next.js (SSR)
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="nestjs">
-                      <div className="flex items-center gap-2">
-                        <div className="h-3 w-3 rounded-sm bg-destructive" />
-                        NestJS (API)
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="vitejs">
-                      <div className="flex items-center gap-2">
-                        <div className="h-3 w-3 rounded-sm bg-purple-500" />
-                        Vite.js (Static SPA)
-                      </div>
-                    </SelectItem>
+                    {presets.map((preset) => (
+                      <SelectItem key={preset.id} value={preset.id}>
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={cn(
+                              'h-3 w-3 rounded-sm',
+                              preset.kind === 'static' ? 'bg-purple-500' : 'bg-primary',
+                            )}
+                            title={preset.kind === 'static' ? 'Servido pelo Nginx' : 'Processo supervisionado'}
+                          />
+                          <span>{preset.label}</span>
+                          <span className="text-xs text-muted-foreground">— {preset.description}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

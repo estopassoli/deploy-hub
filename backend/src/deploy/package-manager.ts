@@ -1,8 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { detectPreset } from './app-presets.ts';
 
 export type PmName = 'npm' | 'pnpm' | 'yarn';
-export type AppType = 'nextjs' | 'nestjs' | 'vitejs';
+/**
+ * Id de preset de aplicação. Era uma união fechada de três literais; virou `string`
+ * porque a lista agora vive em `app-presets.ts` e cresce sem tocar aqui.
+ */
+export type AppType = string;
 
 export interface PmInfo {
   name: PmName;
@@ -152,17 +157,16 @@ const ${o.varName} = resolveBin(${JSON.stringify(o.pkg)}, ${JSON.stringify(o.bin
 }
 
 /** Detect app framework from a directory's package.json deps. Null if unknown. */
-export function detectAppType(appWorkDir: string): AppType | null {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(appWorkDir, 'package.json'), 'utf-8'));
-    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-    if (deps['next']) return 'nextjs';
-    if (deps['@nestjs/core']) return 'nestjs';
-    if (deps['vite']) return 'vitejs';
-  } catch {
-    // ignore
-  }
-  return null;
+/**
+ * Detecta o tipo do app a partir do package.json.
+ *
+ * A lógica vive no registro de presets (`app-presets.ts`), que cobre bem mais que os
+ * três tipos originais e sabe distinguir, por exemplo, Astro estático de Astro SSR.
+ * Esta função continua existindo com a mesma assinatura porque é o que o pipeline e o
+ * scanner de monorepo já chamam.
+ */
+export function detectAppType(appWorkDir: string): string | null {
+  return detectPreset(appWorkDir)?.id ?? null;
 }
 
 /** Read the "name" field of a package.json in the given dir (used to derive the workspace package). */

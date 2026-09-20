@@ -35,6 +35,7 @@ export default function Project() {
   const [pm, setPm] = useState('');
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  const [presets, setPresets] = useState<Array<{ id: string; label: string; description: string; kind: string }>>([]);
   const [errorMsg, setErrorMsg] = useState('');
   const logsEnd = useRef<HTMLDivElement>(null);
   const done = useRef(false);
@@ -42,6 +43,9 @@ export default function Project() {
   useEffect(() => {
     logsEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
+  useEffect(() => {
+    api.getAppPresets().then(setPresets).catch(() => setPresets([]));
+  }, []);
   useEffect(() => () => { getSocket().emit('unsubscribe-deploy'); }, []);
 
   const addLog = (m: string) => setLogs((p) => [...p, m]);
@@ -114,7 +118,7 @@ export default function Project() {
 
     setStep('deploying');
     setLogs([]);
-    addLog(`▶ Deploying project ${projectName} (${included.length} services)...`);
+    addLog(`▶ Deployando o projeto ${projectName} (${included.length} services)...`);
     try {
       await api.createProject({
         name: projectName,
@@ -146,14 +150,14 @@ export default function Project() {
     <Layout>
       <div className="mx-auto max-w-3xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">New Monorepo Project</h1>
-          <p className="mt-1 text-muted-foreground">One clone + install, many services</p>
+          <h1 className="text-3xl font-bold text-foreground">Novo projeto monorepo</h1>
+          <p className="mt-1 text-muted-foreground">Um clone e um install para vários services</p>
         </div>
 
         {step === 'config' && (
           <div className="rounded-xl border border-border bg-card p-6 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="repo">SSH Repository URL</Label>
+              <Label htmlFor="repo">URL do repositório</Label>
               <Input id="repo" placeholder="git@github.com:user/monorepo.git" value={repository} onChange={(e) => setRepository(e.target.value)} className="font-mono" />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -162,15 +166,15 @@ export default function Project() {
                 <Input id="branch" value={branch} onChange={(e) => setBranch(e.target.value)} className="font-mono" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="pname">Project Name</Label>
+                <Label htmlFor="pname">Nome do projeto</Label>
                 <Input id="pname" placeholder="blurp" value={projectName} onChange={(e) => setProjectName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} className="font-mono" />
               </div>
             </div>
             <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => navigate('/')}>Cancel</Button>
+              <Button variant="outline" onClick={() => navigate('/')}>Cancelar</Button>
               <Button variant="gradient" onClick={handleDetect} disabled={detecting || !repository}>
                 {detecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                Detect apps
+                Detectar apps
               </Button>
             </div>
           </div>
@@ -179,10 +183,10 @@ export default function Project() {
         {step === 'configure' && (
           <div className="space-y-4">
             <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-              Package manager: <span className="text-foreground font-mono">{pm}</span> · {services.length} apps detected
+              Package manager: <span className="text-foreground font-mono">{pm}</span> · {services.length} apps detectados
             </div>
             <div className="space-y-2">
-              <Label htmlFor="penv">Project env (shared, written to repo root .env)</Label>
+              <Label htmlFor="penv">Env do projeto (compartilhado, vira o .env da raiz)</Label>
               <textarea id="penv" value={projectEnv} onChange={(e) => setProjectEnv(e.target.value)} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="DATABASE_URL=...&#10;REDIS_URL=..." />
             </div>
             {services.map((s, i) => (
@@ -193,21 +197,37 @@ export default function Project() {
                   <span className="text-xs text-muted-foreground">({s.type} · {s.appDir})</span>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1"><Label className="text-xs">Name</Label><Input value={s.name} onChange={(e) => updateSvc(i, { name: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') })} className="font-mono text-sm" /></div>
-                  <div className="space-y-1"><Label className="text-xs">Port</Label><Input type="number" value={s.port} onChange={(e) => updateSvc(i, { port: e.target.value })} className="font-mono text-sm" /></div>
-                  <div className="space-y-1"><Label className="text-xs">Domain (optional)</Label><Input value={s.domain} onChange={(e) => updateSvc(i, { domain: e.target.value })} className="font-mono text-sm" placeholder="api.example.com" /></div>
-                  <div className="space-y-1"><Label className="text-xs">Type</Label><Input value={s.type} onChange={(e) => updateSvc(i, { type: e.target.value })} className="font-mono text-sm" /></div>
+                  <div className="space-y-1"><Label className="text-xs">Nome</Label><Input value={s.name} onChange={(e) => updateSvc(i, { name: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') })} className="font-mono text-sm" /></div>
+                  <div className="space-y-1"><Label className="text-xs">Porta</Label><Input type="number" value={s.port} onChange={(e) => updateSvc(i, { port: e.target.value })} className="font-mono text-sm" /></div>
+                  <div className="space-y-1"><Label className="text-xs">Domínio (opcional)</Label><Input value={s.domain} onChange={(e) => updateSvc(i, { domain: e.target.value })} className="font-mono text-sm" placeholder="api.example.com" /></div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Tipo</Label>
+                    <select
+                      value={s.type}
+                      onChange={(e) => updateSvc(i, { type: e.target.value })}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      {/* O tipo foi detectado pelo scanner; o select permite corrigir
+                          sem precisar decorar os ids válidos. */}
+                      {presets.length === 0 && <option value={s.type}>{s.type}</option>}
+                      {presets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div className="space-y-1"><Label className="text-xs">Service env (written to {s.appDir}/.env)</Label><textarea value={s.envVars} onChange={(e) => updateSvc(i, { envVars: e.target.value })} className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder="NEXT_PUBLIC_API_URL=..." /></div>
+                <div className="space-y-1"><Label className="text-xs">Env do service (vira {s.appDir}/.env)</Label><textarea value={s.envVars} onChange={(e) => updateSvc(i, { envVars: e.target.value })} className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder="NEXT_PUBLIC_API_URL=..." /></div>
               </div>
             ))}
             <div className="flex items-center gap-2">
               <input type="checkbox" id="ssl" checked={generateSSL} onChange={(e) => setGenerateSSL(e.target.checked)} className="h-4 w-4" />
-              <Label htmlFor="ssl" className="text-sm">Generate SSL (Certbot) for services with a domain</Label>
+              <Label htmlFor="ssl" className="text-sm">Gerar SSL (Certbot) para os services com domínio</Label>
             </div>
             <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setStep('config')}>Back</Button>
-              <Button variant="gradient" onClick={handleDeploy}><Rocket className="h-4 w-4" />Deploy Project</Button>
+              <Button variant="outline" onClick={() => setStep('config')}>Voltar</Button>
+              <Button variant="gradient" onClick={handleDeploy}><Rocket className="h-4 w-4" />Deployar projeto</Button>
             </div>
           </div>
         )}
@@ -216,12 +236,12 @@ export default function Project() {
           <div className="space-y-4">
             {step === 'complete' && (
               <div className="rounded-xl border border-success/30 bg-success/5 p-6 text-center">
-                <h2 className="text-xl font-bold">Project deployed!</h2>
+                <h2 className="text-xl font-bold">Projeto deployado!</h2>
                 <p className="text-muted-foreground mt-1">{projectName}</p>
               </div>
             )}
             {step === 'error' && (
-              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-destructive">Deploy failed: {errorMsg}</div>
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-destructive">Deploy falhou: {errorMsg}</div>
             )}
             <div className="rounded-xl border border-border bg-background overflow-hidden">
               <div className="border-b border-border bg-card px-4 py-2 text-xs font-mono text-muted-foreground">deploy --project {projectName}</div>
@@ -232,7 +252,7 @@ export default function Project() {
             </div>
             {(step === 'complete' || step === 'error') && (
               <div className="flex justify-end gap-3">
-                <Button variant="gradient" onClick={() => navigate('/')}>Go to Dashboard</Button>
+                <Button variant="gradient" onClick={() => navigate('/')}>Ir para o Dashboard</Button>
               </div>
             )}
           </div>

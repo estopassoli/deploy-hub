@@ -28,6 +28,7 @@ import { DeployLock, lockedMessage } from './deploy-lock';
 import { PhaseTracker } from './phase-tracker';
 import { normalizeHealthPath, waitForHealthy } from './health-check';
 import { classifyMigrationOutcome, describeMigrationOutcome } from './migration-outcome';
+import { isStaticPreset, presetOutputDir } from './app-presets';
 import { describeEnvDiff, diffEnv } from './env-diff';
 import { decidePm2Strategy } from './pm2-strategy';
 import {
@@ -330,7 +331,7 @@ export class DeployService implements OnModuleInit {
 
       if (app.activeRuntime === 'docker') {
         await this.appsService.rollback(app.id, anterior.id);
-      } else if (app.type !== 'vitejs') {
+      } else if (!isStaticPreset(app.type)) {
         await runQuiet('pm2', ['restart', app.name]);
       }
 
@@ -428,7 +429,7 @@ export class DeployService implements OnModuleInit {
       );
     }
 
-    if (app.activeRuntime === 'static' || (app.type === 'vitejs' && !app.activeRuntime)) {
+    if (app.activeRuntime === 'static' || (isStaticPreset(app.type) && !app.activeRuntime)) {
       throw new BadRequestException(
         'App estático não lê variáveis em runtime — as mudanças só valem com um redeploy.',
       );
@@ -1004,7 +1005,7 @@ export class DeployService implements OnModuleInit {
           env: envVarsObj,
           assets: dockerAssets,
         });
-      } else if (effectiveType !== 'vitejs') {
+      } else if (!isStaticPreset(effectiveType)) {
         await this.stopDockerApp(app).catch(() => undefined);
         this.log(app.name, '▶ Starting PM2 process...', deploy.id);
         const pm2Config = this.generatePM2Config(app, currentLink, envVarsObj, options.startCommand, {
@@ -1026,7 +1027,11 @@ export class DeployService implements OnModuleInit {
         // For Vite.js static apps, copy dist to /var/www/{app_name}
         await this.stopDockerApp(app).catch(() => undefined);
         this.log(app.name, '▶ Copying dist to /var/www...', deploy.id);
-        const distDir = appDir ? path.join(currentLink, appDir, 'dist') : path.join(currentLink, 'dist');
+        // A pasta de saída vem do preset: SvelteKit estático gera em `build/`, Vite e
+        // Astro em `dist/`. Antes era `dist` fixo, e um framework com outra convenção
+        // publicava um diretório vazio.
+        const outDir = presetOutputDir(effectiveType);
+        const distDir = appDir ? path.join(currentLink, appDir, outDir) : path.join(currentLink, outDir);
         await this.publishStatic(app.name, distDir);
         this.log(app.name, `✓ Static files copied to ${path.join(WWW_DIR, app.name)}`, deploy.id);
       }
@@ -1577,7 +1582,7 @@ export class DeployService implements OnModuleInit {
     deployId?: string,
   ): { kind: RuntimeKind; assets: DockerAssets } {
     const assets = detectDockerAssets(workDir, releaseDir);
-    const fallback: RuntimeKind = (app.type === 'vitejs' ? 'static' : 'pm2');
+    const fallback: RuntimeKind = isStaticPreset(app.type) ? 'static' : 'pm2';
     const kind = resolveRuntime(app.runtime, assets, fallback);
     if (kind === 'docker') {
       const via = assets.composeFile ? `compose (${path.basename(assets.composeFile)})` : 'Dockerfile';
@@ -1772,7 +1777,7 @@ export class DeployService implements OnModuleInit {
         env: svcEnv,
         assets,
       });
-    } else if (effectiveType !== 'vitejs') {
+    } else if (!isStaticPreset(effectiveType)) {
       await this.stopDockerApp(svc).catch(() => undefined);
       const cfg = this.generatePM2Config(svc, currentLink, svcEnv, svc.startCommand || undefined, {
         pm,
@@ -1790,7 +1795,8 @@ export class DeployService implements OnModuleInit {
       this.log(projectName, `✓ [${svc.name}] PM2 on port ${svc.port}`);
     } else {
       await this.stopDockerApp(svc).catch(() => undefined);
-      const distDir = svc.appDir ? path.join(currentLink, svc.appDir, 'dist') : path.join(currentLink, 'dist');
+      const outDir = presetOutputDir(effectiveType);
+      const distDir = svc.appDir ? path.join(currentLink, svc.appDir, outDir) : path.join(currentLink, outDir);
       await this.publishStatic(svc.name, distDir);
       this.log(projectName, `✓ [${svc.name}] static → ${path.join(WWW_DIR, svc.name)}`);
     }
@@ -1839,8 +1845,9 @@ export class DeployService implements OnModuleInit {
           env: { ...projectEnv, ...this.parseEnvVars(svc.envVars || undefined) },
           assets: detectDockerAssets(svcDir, deploy.path),
         }).catch((e) => this.log(project.name, `❌ [${svc.name}] rollback falhou: ${e.message}`));
-      } else if (svc.type === 'vitejs') {
-        const distDir = svc.appDir ? path.join(deploy.path, svc.appDir, 'dist') : path.join(deploy.path, 'dist');
+      } else if (isStaticPreset(svc.type)) {
+        const outDir = presetOutputDir(svc.type);
+        const distDir = svc.appDir ? path.join(deploy.path, svc.appDir, outDir) : path.join(deploy.path, outDir);
         await this.publishStatic(svc.name, distDir).catch(() => undefined);
       } else {
         await runQuiet('pm2', ['restart', svc.name]);
@@ -2009,7 +2016,7 @@ ${envString}
     // Only a genuinely static deploy gets the /var/www root. A Vite app running in a
     // container serves its own files, so it needs the proxy vhost like anything else —
     // pointing nginx at an empty /var/www/<app> would serve 404s next to a healthy container.
-    const kind: RuntimeKind = runtime || app.activeRuntime || (app.type === 'vitejs' ? 'static' : 'pm2');
+    const kind: RuntimeKind = runtime || app.activeRuntime || (isStaticPreset(app.type) ? 'static' : 'pm2');
     const config = kind === 'static'
       ? staticVhostConfig({ domain: app.domain, appName: app.name, hasCert })
       : proxyVhostConfig({ domain: app.domain, port: app.port, hasCert });

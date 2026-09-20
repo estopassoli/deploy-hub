@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { assertInside, assertSafeName } from '../common/paths';
 import { run, runShell, sudo } from '../common/run';
+import { isStaticPreset } from '../deploy/app-presets';
 import { proxyVhostConfig, staticVhostConfig } from '../deploy/nginx-config';
 import {
   appState,
@@ -78,7 +79,7 @@ export class AppsService {
         }
 
         // For Vite.js apps, check if static files exist in /var/www
-        if (app.type === 'vitejs') {
+        if (isStaticPreset(app.type)) {
           const staticStatus = await this.getStaticAppStatus(app.name);
           return {
             ...app,
@@ -349,7 +350,7 @@ export class AppsService {
       }
     }
 
-    if (app.type === 'vitejs') {
+    if (isStaticPreset(app.type)) {
       // Static apps don't need PM2
       return { success: true, message: 'App estático servido pelo Nginx' };
     }
@@ -475,7 +476,7 @@ export class AppsService {
 
       if (isDocker(app)) {
         await this.rollbackDocker(app, deploy);
-      } else if (app.type !== 'vitejs') {
+      } else if (!isStaticPreset(app.type)) {
         // Restart PM2 if needed
         await run('pm2', ['restart', app.name]);
       }
@@ -614,7 +615,7 @@ export class AppsService {
     const hasCert = Boolean(app.domain && fs.existsSync(`/etc/letsencrypt/live/${app.domain}/fullchain.pem`));
     // A Vite app running in a container serves its own files — only a genuinely static
     // deploy gets the /var/www root.
-    const isStatic = app.activeRuntime ? app.activeRuntime === 'static' : app.type === 'vitejs';
+    const isStatic = app.activeRuntime ? app.activeRuntime === 'static' : isStaticPreset(app.type);
     const config = isStatic
       ? staticVhostConfig({ domain: app.domain, appName: app.name, hasCert })
       : proxyVhostConfig({ domain: app.domain, port: app.port, hasCert });

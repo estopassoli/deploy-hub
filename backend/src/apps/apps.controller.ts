@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Inject, forwardRef } from '@nestjs/common';
+import { presetOptions } from '../deploy/app-presets';
 import { DeployService } from '../deploy/deploy.service';
 import { AppsService } from './apps.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -17,6 +18,17 @@ export class AppsController {
   @Get()
   async findAll() {
     return this.appsService.findAll();
+  }
+
+  /**
+   * Presets de aplicação disponíveis, para o select do painel.
+   *
+   * Declarado ANTES de `@Get(':id')`: o Nest resolve rotas na ordem de declaração, e
+   * `:id` capturaria "presets" se viesse primeiro.
+   */
+  @Get('presets')
+  async presets() {
+    return presetOptions();
   }
 
   @Get(':id')

@@ -39,10 +39,17 @@ import {
   NAME_MAX_LENGTH,
   NAME_PATTERN,
 } from '../common/validation.ts';
+import { APP_PRESET_IDS } from '../deploy/app-presets.ts';
 import { IsSafeRepositoryUrl } from '../common/validation-decorators.ts';
 
-/** Tipos de app aceitos hoje. A Fase 6 troca isto por um registro de presets. */
-export const APP_TYPES = ['nestjs', 'nextjs', 'vitejs'] as const;
+/**
+ * Tipos de app aceitos, vindos do registro de presets.
+ *
+ * Era um enum fechado de três valores repetido em quatro lugares. Agora a lista sai de
+ * `app-presets.ts`: adicionar um framework é adicionar um preset, e os DTOs, a detecção
+ * e o select do painel passam a aceitá-lo sozinhos.
+ */
+export const APP_TYPES = APP_PRESET_IDS;
 
 /** Preferência de runtime pedida pelo usuário (`activeRuntime` é escrito pelo deploy). */
 export const APP_RUNTIMES = ['auto', 'pm2', 'docker'] as const;

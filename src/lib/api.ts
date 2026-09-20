@@ -75,6 +75,11 @@ class ApiClient {
     return this.request<any[]>('/apps');
   }
 
+  /** Presets de aplicação suportados (tipo, rótulo, se é estático). */
+  async getAppPresets() {
+    return this.request<Array<{ id: string; label: string; description: string; kind: string }>>('/apps/presets');
+  }
+
   async getApp(id: string) {
     return this.request<any>(`/apps/${id}`);
   }

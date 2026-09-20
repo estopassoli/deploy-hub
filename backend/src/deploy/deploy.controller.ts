@@ -4,6 +4,7 @@ import { Transform } from 'class-transformer';
 import { DeployService } from './deploy.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { BRANCH_PATTERN, NAME_MAX_LENGTH, NAME_PATTERN } from '../common/validation';
+import { APP_PRESET_IDS } from './app-presets';
 import { IsSafeDomain, IsSafeRepositoryUrl } from '../common/validation-decorators';
 
 class DeployDto {
@@ -29,9 +30,10 @@ class DeployDto {
   @IsSafeDomain()
   domain?: string;
 
+  // Lista vinda do registro de presets: adicionar um framework não exige tocar aqui.
   @IsString()
-  @IsIn(['nestjs', 'nextjs', 'vitejs'])
-  type: 'nestjs' | 'nextjs' | 'vitejs';
+  @IsIn(APP_PRESET_IDS, { message: `type deve ser um destes: ${APP_PRESET_IDS.join(', ')}` })
+  type: string;
 
   @IsOptional()
   @IsString()

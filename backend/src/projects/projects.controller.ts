@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } fro
 import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { APP_PRESET_IDS } from '../deploy/app-presets';
 import { BRANCH_PATTERN, NAME_MAX_LENGTH, NAME_PATTERN } from '../common/validation';
 import { IsSafeDomain, IsSafeRepositoryUrl } from '../common/validation-decorators';
 import { ProjectsService } from './projects.service';
@@ -17,7 +18,7 @@ class ServiceDto {
   name: string;
   @IsString() appDir: string;
   @IsOptional() @IsString() workspacePackage?: string;
-  @IsString() @IsIn(['nestjs', 'nextjs', 'vitejs']) type: string;
+  @IsString() @IsIn(APP_PRESET_IDS, { message: `type deve ser um destes: ${APP_PRESET_IDS.join(', ')}` }) type: string;
   @IsNumber() @Transform(({ value }) => parseInt(value, 10)) port: number;
   @IsOptional() @IsSafeDomain() domain?: string;
   @IsOptional() @IsString() envVars?: string;

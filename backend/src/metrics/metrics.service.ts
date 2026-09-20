@@ -3,7 +3,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DeployGateway } from '../deploy/deploy.gateway';
 import { EmailService } from '../email/email.service';
 import { run } from '../common/run';
+import { APP_PRESETS } from '../deploy/app-presets';
 import { appState, appStats } from '../deploy/docker';
+
+/** Tipos servidos como arquivos pelo nginx: sem processo para medir. */
+const STATIC_PRESET_IDS = APP_PRESETS.filter((preset) => preset.kind === 'static').map((p) => p.id);
 const COLLECT_INTERVAL = 30000; // 30 seconds
 const RETENTION_HOURS = 24; // Keep 24 hours of data
 
@@ -43,8 +47,13 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
     try {
       // Static apps have no process to sample. Containerised ones do, whatever their
       // type: a dockerized Vite app is a running nginx, not files on disk.
+      // Apps estáticos não têm processo para amostrar. A lista de tipos estáticos
+      // vem do registro de presets — antes era só 'vitejs', então um site Astro ou
+      // SvelteKit estático entrava na coleta e gerava métrica zerada para sempre.
       const apps = await this.prisma.app.findMany({
-        where: { OR: [{ type: { not: 'vitejs' } }, { activeRuntime: 'docker' }] },
+        where: {
+          OR: [{ type: { notIn: STATIC_PRESET_IDS } }, { activeRuntime: 'docker' }],
+        },
       });
 
       const pm2Data = await this.getPM2Metrics();
