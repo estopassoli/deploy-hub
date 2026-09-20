@@ -6,13 +6,10 @@ import {
 } from '@nestjs/websockets';
 import { spawn } from 'child_process';
 import { Server, Socket } from 'socket.io';
+import { getSocketUser } from '../auth/auth-tokens';
 
-@WebSocketGateway({
-  cors: {
-    origin: "*",
-    credentials: true,
-  },
-})
+// CORS e autenticação do handshake vêm do AuthenticatedIoAdapter (main.ts).
+@WebSocketGateway()
 export class LogsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
@@ -20,6 +17,13 @@ export class LogsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private logProcesses: Map<string, any> = new Map();
 
   handleConnection(client: Socket) {
+    // Defesa em profundidade: este handler começa a transmitir os logs de TODOS os apps
+    // assim que alguém conecta, então ele não roda para socket sem usuário resolvido.
+    if (!getSocketUser(client)) {
+      client.disconnect(true);
+      return;
+    }
+
     console.log(`Client connected: ${client.id}`);
     this.startLogStream(client);
   }

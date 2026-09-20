@@ -81,11 +81,21 @@ export default function Terminal() {
       const handleConnect = () => setIsConnected(true);
       const handleDisconnect = () => setIsConnected(false);
 
+      // O backend passou a exigir JWT no handshake: sem token válido a conexão é
+      // recusada e o terminal ficaria mudo. Mostra o motivo em vez de travar.
+      const handleConnectError = (err: Error) => {
+        setIsConnected(false);
+        if (err?.message === 'unauthorized') {
+          terminal.writeln('\r\n[erro] Sessão expirada ou não autenticada. Faça login novamente.\r\n');
+        }
+      };
+
       socket.on('terminal:data', handleData);
       socket.on('terminal:exit', handleExit);
       socket.on('terminal:error', handleError);
       socket.on('connect', handleConnect);
       socket.on('disconnect', handleDisconnect);
+      socket.on('connect_error', handleConnectError);
 
       if (socket.connected) {
         handleConnect();
@@ -104,6 +114,7 @@ export default function Terminal() {
         socket.off('terminal:error', handleError);
         socket.off('connect', handleConnect);
         socket.off('disconnect', handleDisconnect);
+        socket.off('connect_error', handleConnectError);
         socket.emit('terminal:kill');
         if (terminalRef.current === terminal) {
           terminalRef.current = null;
@@ -119,6 +130,11 @@ export default function Terminal() {
 
     init().catch((err) => {
       console.warn('Terminal: failed to initialize WebSocket session:', err);
+      toast.error(
+        err?.message === 'unauthorized'
+          ? 'Sessão expirada — faça login novamente para usar o terminal'
+          : 'Não foi possível conectar ao terminal',
+      );
     });
 
     return () => {

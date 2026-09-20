@@ -1,12 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { getSocketUser } from '../auth/auth-tokens';
 
-@WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
-})
+// CORS e autenticação do handshake vêm do AuthenticatedIoAdapter (main.ts).
+@WebSocketGateway()
 export class DeployGateway {
   @WebSocketServer()
   server: Server;
@@ -18,6 +16,13 @@ export class DeployGateway {
     @MessageBody() data: { appName: string },
     @ConnectedSocket() client: Socket,
   ) {
+    // Defesa em profundidade: os logs de deploy ecoam os comandos executados no
+    // servidor, então nenhum socket anônimo entra na sala.
+    if (!getSocketUser(client)) {
+      client.disconnect(true);
+      return;
+    }
+
     const { appName } = data;
     if (!this.deploySubscribers.has(appName)) {
       this.deploySubscribers.set(appName, new Set());

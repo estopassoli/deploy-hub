@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { getToken, onTokenChange } from './token';
 
 const resolveWsUrl = () => {
   const explicit = import.meta.env.VITE_WS_URL?.trim();
@@ -24,10 +25,14 @@ const resolveWsUrl = () => {
 
 const WS_URL = resolveWsUrl();
 
+/** Mensagem que o middleware de autenticação do backend devolve no handshake. */
+const UNAUTHORIZED = 'unauthorized';
+
 class WebSocketClient {
   private socket: Socket | null = null;
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
   private connectionPromise: Promise<Socket> | null = null;
+  private tokenSubscription: (() => void) | null = null;
 
   // Lazily create the socket once and attach the persistent listeners. The
   // socket auto-reconnects on its own; we never create more than one instance.
@@ -40,18 +45,52 @@ class WebSocketClient {
       transports: ['websocket', 'polling'],
       autoConnect: true,
       reconnection: true,
+      // O backend passou a exigir JWT no handshake. `auth` como função é relido a cada
+      // tentativa de conexão, então um token renovado entra sozinho na reconexão — e
+      // ele viaja no payload do handshake, não na URL (que acabaria no log do nginx).
+      auth: (cb) => cb({ token: getToken() ?? '' }),
     });
 
     socket.on('connect', () => console.log('WebSocket connected'));
     socket.on('disconnect', () => console.log('WebSocket disconnected'));
-    socket.on('connect_error', (err) =>
-      console.warn('WebSocket connect_error:', err?.message ?? err),
-    );
+    socket.on('connect_error', (err) => {
+      if (err?.message === UNAUTHORIZED) {
+        // Sem token válido não adianta insistir: cada tentativa seria recusada no
+        // handshake. Paramos e esperamos o onTokenChange do login para reconectar.
+        console.warn('WebSocket recusado: não autenticado');
+        socket.disconnect();
+        this.emit('auth-error', { message: 'Sessão expirada ou não autenticada' });
+        return;
+      }
+      console.warn('WebSocket connect_error:', err?.message ?? err);
+    });
     socket.on('log', (data) => this.emit('log', data));
     socket.on('log-error', (data) => this.emit('log-error', data));
 
     this.socket = socket;
+    this.watchToken();
     return socket;
+  }
+
+  /** Reconecta quando o token muda (login) e desconecta quando some (logout). */
+  private watchToken(): void {
+    if (this.tokenSubscription) return;
+
+    this.tokenSubscription = onTokenChange((token) => {
+      const socket = this.socket;
+      if (!socket) return;
+
+      this.connectionPromise = null;
+
+      if (!token) {
+        socket.disconnect();
+        return;
+      }
+
+      // Derruba e sobe de novo para o handshake carregar o token novo.
+      socket.disconnect();
+      socket.connect();
+    });
   }
 
   connect(timeoutMs = 8000): Promise<Socket> {
@@ -63,6 +102,12 @@ class WebSocketClient {
 
     if (this.connectionPromise) {
       return this.connectionPromise;
+    }
+
+    // O socket pode ter sido desconectado por falta de token; se já existe token,
+    // religa antes de esperar.
+    if (socket.disconnected && getToken()) {
+      socket.connect();
     }
 
     // Always settle this promise (resolve, reject, or timeout) and clear the
@@ -101,6 +146,8 @@ class WebSocketClient {
       this.socket = null;
       this.connectionPromise = null;
     }
+    this.tokenSubscription?.();
+    this.tokenSubscription = null;
   }
 
   subscribeLogs(appName: string) {

@@ -1,24 +1,20 @@
+import { clearToken, getToken, setToken } from './token';
+
 const API_URL = import.meta.env.VITE_API_URL || 'https://api-panel.auraai.chat/api';
 
 class ApiClient {
-  private token: string | null = null;
-
-  constructor() {
-    this.token = localStorage.getItem('deployhub_token');
-  }
-
+  // O token vive em token.ts para que o cliente WebSocket leia o mesmo valor e seja
+  // avisado no login/logout — ele precisa do JWT no handshake desde a Fase 1.
   setToken(token: string) {
-    this.token = token;
-    localStorage.setItem('deployhub_token', token);
+    setToken(token);
   }
 
   clearToken() {
-    this.token = null;
-    localStorage.removeItem('deployhub_token');
+    clearToken();
   }
 
   getToken() {
-    return this.token;
+    return getToken();
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -27,8 +23,9 @@ class ApiClient {
       ...((options.headers as Record<string, string>) || {}),
     };
 
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+    const token = getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
 
     const response = await fetch(`${API_URL}${endpoint}`, {

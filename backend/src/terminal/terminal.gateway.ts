@@ -7,24 +7,45 @@ import {
 } from '@nestjs/websockets';
 import { IPty, spawn } from 'node-pty';
 import { Server, Socket } from 'socket.io';
+import { getSocketUser } from '../auth/auth-tokens';
 
-@WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
-})
+// O CORS e a autenticação do handshake vêm do AuthenticatedIoAdapter (main.ts), que
+// cobre os três gateways de uma vez. Um socket sem JWT válido nunca chega aqui.
+@WebSocketGateway()
 export class TerminalGateway {
   @WebSocketServer()
   server: Server;
 
   private terminals: Map<string, IPty> = new Map();
+  /** userId -> clientId do terminal vivo desse usuário. Um terminal por usuário. */
+  private terminalOwners: Map<string, string> = new Map();
 
   @SubscribeMessage('terminal:init')
   handleInit(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload?: { cols?: number; rows?: number },
   ) {
+    // Defesa em profundidade: o middleware do adapter já recusa o handshake anônimo,
+    // mas este handler abre um shell — ele não roda sem usuário resolvido, ponto.
+    const user = getSocketUser(client);
+    if (!user) {
+      client.emit('terminal:error', 'Não autenticado');
+      client.disconnect(true);
+      return;
+    }
+
     this.killProcess(client.id);
+
+    // Um terminal por usuário: derruba o anterior, mesmo que esteja em outro socket
+    // (aba antiga, janela destacada, reconexão que deixou o PTY órfão). Sem isto, cada
+    // reload acumulava um processo de shell vivo no servidor.
+    const previousClientId = this.terminalOwners.get(user.userId);
+    if (previousClientId && previousClientId !== client.id) {
+      this.server.sockets.sockets
+        .get(previousClientId)
+        ?.emit('terminal:exit', { exitCode: 0 });
+      this.killProcess(previousClientId);
+    }
 
     const shell = process.env.SHELL || '/bin/bash';
     const cols = payload?.cols ?? 80;
@@ -39,6 +60,7 @@ export class TerminalGateway {
     });
 
     this.terminals.set(client.id, ptyProcess);
+    this.terminalOwners.set(user.userId, client.id);
 
     ptyProcess.onData((data) => {
       client.emit('terminal:data', data);
@@ -55,6 +77,11 @@ export class TerminalGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: { data: string },
   ) {
+    if (!getSocketUser(client)) {
+      client.disconnect(true);
+      return;
+    }
+
     const terminal = this.terminals.get(client.id);
     if (!terminal) {
       client.emit('terminal:error', 'Terminal não inicializado');
@@ -100,6 +127,10 @@ export class TerminalGateway {
         console.error('Erro ao finalizar terminal:', error);
       }
       this.terminals.delete(clientId);
+    }
+
+    for (const [userId, ownedClientId] of this.terminalOwners) {
+      if (ownedClientId === clientId) this.terminalOwners.delete(userId);
     }
   }
 }
