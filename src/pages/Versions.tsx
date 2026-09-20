@@ -41,6 +41,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import api from '@/lib/api';
 import { formatDateTime, formatElapsed } from '@/lib/format';
+import { VersionListSkeleton } from '@/components/Skeletons';
 import { App } from '@/types/app';
 
 interface Version {
@@ -97,7 +98,7 @@ export default function Versions() {
         setSelectedAppId(data[0].id);
       }
     } catch (error: any) {
-      toast.error(error.message || 'Failed to load apps');
+      toast.error(error.message || 'Erro ao carregar apps');
     } finally {
       setIsLoading(false);
     }
@@ -109,7 +110,7 @@ export default function Versions() {
       const data = await api.getAppVersions(selectedAppId);
       setVersions(data);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to load versions');
+      toast.error(error.message || 'Erro ao carregar releases');
     } finally {
       setIsLoadingVersions(false);
     }
@@ -121,7 +122,7 @@ export default function Versions() {
       toast.success(`Rolling back to version ${versionId}...`);
       loadVersions();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to rollback');
+      toast.error(error.message || 'Erro ao fazer rollback');
     }
   };
 
@@ -131,7 +132,7 @@ export default function Versions() {
       toast.success(`Version ${versionId} deleted`);
       loadVersions();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to delete version');
+      toast.error(error.message || 'Erro ao excluir a release');
     }
   };
 
@@ -148,7 +149,7 @@ export default function Versions() {
         status: data.status,
       });
     } catch (error: any) {
-      toast.error(error.message || 'Failed to load deploy logs');
+      toast.error(error.message || 'Erro ao carregar os logs do deploy');
       setLogsModalOpen(false);
     } finally {
       setIsLoadingLogs(false);
@@ -158,8 +159,9 @@ export default function Versions() {
   if (isLoading) {
     return (
       <Layout>
-        <div className="flex h-[50vh] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="mx-auto max-w-4xl">
+          <div className="mb-8 h-9 w-72 animate-pulse rounded bg-secondary" />
+          <VersionListSkeleton />
         </div>
       </Layout>
     );
@@ -170,8 +172,8 @@ export default function Versions() {
       <Layout>
         <div className="flex h-[50vh] flex-col items-center justify-center text-center">
           <GitCommit className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold">No apps found</h2>
-          <p className="text-muted-foreground mt-2">Deploy an app first to manage versions</p>
+          <h2 className="text-xl font-semibold">Nenhum app cadastrado</h2>
+          <p className="text-muted-foreground mt-2">Faça um deploy para começar a ver releases aqui</p>
         </div>
       </Layout>
     );
@@ -183,14 +185,14 @@ export default function Versions() {
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Version Management</h1>
+            <h1 className="text-3xl font-bold text-foreground">Gerenciamento de versões</h1>
             <p className="mt-1 text-muted-foreground">
-              Manage releases and perform rollbacks
+              Releases, rollback e logs de cada deploy
             </p>
           </div>
           <Select value={selectedAppId} onValueChange={setSelectedAppId}>
             <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="Select app" />
+              <SelectValue placeholder="Selecione um app" />
             </SelectTrigger>
             <SelectContent>
               {apps.map(app => (
@@ -203,9 +205,7 @@ export default function Versions() {
         </div>
 
         {isLoadingVersions ? (
-          <div className="flex h-[30vh] items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
+          <VersionListSkeleton />
         ) : selectedApp && (
           <>
             {/* Current Version Card */}

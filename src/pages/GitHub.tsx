@@ -74,7 +74,7 @@ export default function GitHub() {
         setSelectedAppId(data[0].id);
       }
     } catch (error: any) {
-      toast.error(error.message || 'Failed to load apps');
+      toast.error(error.message || 'Erro ao carregar apps');
     } finally {
       setIsLoading(false);
     }
@@ -85,7 +85,7 @@ export default function GitHub() {
       const yaml = await api.getGithubWorkflow(selectedAppId);
       setWorkflowYaml(yaml);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to load workflow');
+      toast.error(error.message || 'Erro ao carregar o workflow');
     }
   };
 
@@ -98,15 +98,15 @@ export default function GitHub() {
       setCopiedSecret(true);
       setTimeout(() => setCopiedSecret(false), 2000);
     }
-    toast.success('Copied to clipboard!');
+    toast.success('Copiado!');
   };
 
   const regenerateSecret = async () => {
     try {
       await api.regenerateWebhookSecret(selectedAppId);
-      toast.success('New webhook secret generated');
+      toast.success('Novo secret gerado');
     } catch (error: any) {
-      toast.error(error.message || 'Failed to regenerate secret');
+      toast.error(error.message || 'Erro ao gerar novo secret');
     }
   };
 
@@ -125,8 +125,8 @@ export default function GitHub() {
       <Layout>
         <div className="flex h-[50vh] flex-col items-center justify-center text-center">
           <Github className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold">No apps found</h2>
-          <p className="text-muted-foreground mt-2">Deploy an app first to configure GitHub Actions</p>
+          <h2 className="text-xl font-semibold">Nenhum app cadastrado</h2>
+          <p className="text-muted-foreground mt-2">Faça um deploy para configurar o GitHub Actions</p>
         </div>
       </Layout>
     );
@@ -139,19 +139,19 @@ export default function GitHub() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
             <Github className="h-8 w-8" />
-            GitHub Actions Integration
+            Integração com GitHub Actions
           </h1>
           <p className="mt-1 text-muted-foreground">
-            Configure automatic deployments from your GitHub repository
+            Configure deploys automáticos a partir do seu repositório
           </p>
         </div>
 
         {/* App Selector */}
         <div className="mb-8">
-          <Label>Select Application</Label>
+          <Label>Selecione a aplicação</Label>
           <Select value={selectedAppId} onValueChange={setSelectedAppId}>
             <SelectTrigger className="w-full mt-2">
-              <SelectValue placeholder="Select app" />
+              <SelectValue placeholder="Selecione um app" />
             </SelectTrigger>
             <SelectContent>
               {apps.map(app => (
@@ -170,18 +170,18 @@ export default function GitHub() {
 
         {selectedApp && (
           <div className="space-y-8">
-            {/* Webhook Secret */}
+            {/* Secret do webhook */}
             <div className="rounded-xl border border-border bg-card p-6">
               <div className="flex items-center gap-2 mb-4">
                 <Shield className="h-5 w-5 text-primary" />
-                <h3 className="font-semibold text-foreground">Webhook Secret</h3>
+                <h3 className="font-semibold text-foreground">Secret do webhook</h3>
               </div>
               <p className="text-sm text-muted-foreground mb-4">
                 Add this secret to your GitHub repository settings under <strong>Settings → Secrets → Actions</strong> with the name <code className="px-1 py-0.5 bg-secondary rounded text-primary">DEPLOY_WEBHOOK_SECRET</code>
               </p>
               <div className="flex gap-2">
                 <Input
-                  value={selectedApp.webhookSecret || 'Not generated'}
+                  value={selectedApp.webhookSecret || 'Ainda não gerado'}
                   readOnly
                   className="font-mono text-sm"
                 />
@@ -198,11 +198,11 @@ export default function GitHub() {
               </div>
             </div>
 
-            {/* Webhook Endpoint */}
+            {/* Endpoint do webhook */}
             <div className="rounded-xl border border-border bg-card p-6">
               <div className="flex items-center gap-2 mb-4">
                 <Webhook className="h-5 w-5 text-primary" />
-                <h3 className="font-semibold text-foreground">Webhook Endpoint</h3>
+                <h3 className="font-semibold text-foreground">Endpoint do webhook</h3>
               </div>
               <p className="text-sm text-muted-foreground mb-4">
                 The deploy webhook endpoint that GitHub Actions will call:
@@ -228,7 +228,7 @@ export default function GitHub() {
               <div className="flex items-center justify-between border-b border-border px-4 py-3">
                 <div className="flex items-center gap-2">
                   <FileCode className="h-5 w-5 text-primary" />
-                  <h3 className="font-semibold text-foreground">GitHub Actions Workflow</h3>
+                  <h3 className="font-semibold text-foreground">Workflow do GitHub Actions</h3>
                 </div>
                 <Button
                   variant="outline"
@@ -249,14 +249,14 @@ export default function GitHub() {
 
             {/* Setup Steps */}
             <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="font-semibold text-foreground mb-4">Setup Instructions</h3>
+              <h3 className="font-semibold text-foreground mb-4">Como configurar</h3>
               <ol className="space-y-4">
                 <li className="flex gap-3">
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
                     1
                   </span>
                   <div>
-                    <p className="font-medium text-foreground">Add Webhook Secret</p>
+                    <p className="font-medium text-foreground">Add Secret do webhook</p>
                     <p className="text-sm text-muted-foreground">
                       Go to your GitHub repo → Settings → Secrets → Actions → New repository secret
                     </p>
@@ -267,7 +267,7 @@ export default function GitHub() {
                     2
                   </span>
                   <div>
-                    <p className="font-medium text-foreground">Create Workflow File</p>
+                    <p className="font-medium text-foreground">Crie o arquivo de workflow</p>
                     <p className="text-sm text-muted-foreground">
                       Copy the YAML above and save it as <code>.github/workflows/deploy.yml</code>
                     </p>
@@ -278,7 +278,7 @@ export default function GitHub() {
                     3
                   </span>
                   <div>
-                    <p className="font-medium text-foreground">Push to Trigger</p>
+                    <p className="font-medium text-foreground">Faça push para disparar</p>
                     <p className="text-sm text-muted-foreground">
                       Push to the <code className="px-1 py-0.5 bg-secondary rounded">{selectedApp.branch}</code> branch to trigger automatic deployment
                     </p>
@@ -296,7 +296,7 @@ export default function GitHub() {
                   rel="noopener noreferrer"
                 >
                   <ExternalLink className="h-4 w-4" />
-                  Open Repository Settings
+                  Abrir configurações do repositório
                 </a>
               </Button>
             </div>

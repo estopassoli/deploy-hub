@@ -9,6 +9,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { EnvEditor } from '@/components/apps/EnvEditor';
 import api from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { getConnectedSocket, getSocket } from '@/lib/websocket';
@@ -137,12 +138,12 @@ export default function Deploy() {
     
     // Basic validation
     if (port < 1024) {
-      setPortError('Ports below 1024 are reserved for system services');
+      setPortError('Portas abaixo de 1024 são reservadas para serviços do sistema');
       return;
     }
     
     if (port === 10000 || port === 10001) {
-      setPortError('This port is used by DeployHub');
+      setPortError('Esta porta é usada pelo próprio DeployHub');
       return;
     }
 
@@ -154,7 +155,7 @@ export default function Deploy() {
         if (result.usedBy) {
           setPortError(`Port ${port} is used by ${result.usedBy}`);
         } else if (result.isSystemPort) {
-          setPortError(`Port ${port} is a system reserved port`);
+          setPortError(`Port ${port} é uma porta reservada do sistema`);
         }
       }
     } catch (error) {
@@ -190,7 +191,7 @@ export default function Deploy() {
           addLog(`  Version: ${details.version}`);
         }
         setStep('complete');
-        toast.success('Deploy completed successfully!');
+        toast.success('Deploy concluído com sucesso!');
       } else {
         const errorText = details?.error || 'Deploy failed';
         setErrorMessage(errorText);
@@ -283,7 +284,7 @@ export default function Deploy() {
     e.preventDefault();
     if (portError || portChecking) return;
     if (!formData.type) {
-      toast.error('Please select an app type');
+      toast.error('Selecione o tipo do app');
       return;
     }
     handleDeploy();
@@ -326,15 +327,15 @@ export default function Deploy() {
       <div className="mx-auto max-w-3xl overflow-hidden">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">New Deploy</h1>
+          <h1 className="text-3xl font-bold text-foreground">Novo deploy</h1>
           <p className="mt-1 text-muted-foreground">
-            Deploy a new application to your server
+            Publique uma nova aplicação no seu servidor
           </p>
         </div>
 
         {/* Steps Indicator */}
         <div className="mb-8 flex items-center gap-4">
-          {['Configure', 'Deploy', 'Complete'].map((label, index) => {
+          {['Configurar', 'Deploy', 'Concluído'].map((label, index) => {
             const stepIndex = step === 'error' ? 1 : ['config', 'deploying', 'complete'].indexOf(step);
             const isActive = index === stepIndex;
             const isComplete = stepIndex > index;
@@ -374,7 +375,7 @@ export default function Deploy() {
               <div className="space-y-2">
                 <Label htmlFor="repository" className="flex items-center gap-2">
                   <GitBranch className="h-4 w-4" />
-                  SSH Repository URL
+                  URL do repositório
                 </Label>
                 <Input
                   id="repository"
@@ -385,7 +386,7 @@ export default function Deploy() {
                   className="font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Make sure the server has SSH access to this repository
+                  O servidor precisa ter acesso SSH a este repositório
                 </p>
               </div>
 
@@ -393,7 +394,7 @@ export default function Deploy() {
                 <div className="space-y-2">
                   <Label htmlFor="name" className="flex items-center gap-2">
                     <Server className="h-4 w-4" />
-                    App Name
+                    Nome do app
                   </Label>
                   <Input
                     id="name"
@@ -445,7 +446,7 @@ export default function Deploy() {
                 <div className="space-y-2">
                   <Label htmlFor="domain" className="flex items-center gap-2">
                     <Globe className="h-4 w-4" />
-                    Domain (optional)
+                    Domínio (opcional)
                   </Label>
                   <Input
                     id="domain"
@@ -457,13 +458,13 @@ export default function Deploy() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="type">App Type</Label>
+                <Label htmlFor="type">Tipo do app</Label>
                 <Select
                   value={formData.type}
                   onValueChange={(value) => setFormData({ ...formData, type: value })}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select app type" />
+                    <SelectValue placeholder="Selecione o tipo" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="nextjs">
@@ -488,28 +489,19 @@ export default function Deploy() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="envVars" className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4" />
-                  Environment Variables (optional)
-                </Label>
-                <textarea
-                  id="envVars"
-                  placeholder="DATABASE_URL=postgres://...&#10;SECRET_KEY=abc123&#10;NODE_ENV=production"
-                  value={formData.envVars}
-                  onChange={(e) => setFormData({ ...formData, envVars: e.target.value })}
-                  className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                />
-                <p className="text-xs text-muted-foreground">
-                  One variable per line in KEY=value format. Will be saved as .env
-                </p>
-              </div>
+              <EnvEditor
+                value={formData.envVars}
+                onChange={(envVars) => setFormData({ ...formData, envVars })}
+                baseline=""
+                label="Variáveis de ambiente (opcional)"
+                description="Viram o arquivo .env da release. Chaves NEXT_PUBLIC_ e VITE_ são embutidas no build."
+              />
 
               {/* Custom Commands Section */}
               <div className="border-t border-border pt-4">
                 <h3 className="text-sm font-medium mb-4 flex items-center gap-2">
                   <Server className="h-4 w-4" />
-                  Custom Commands (optional)
+                  Comandos customizados (opcional)
                 </h3>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
@@ -691,7 +683,7 @@ export default function Deploy() {
               <div className="h-[400px] overflow-auto p-4 font-mono text-sm terminal-scroll">
                 {deployLogs.length === 0 ? (
                   <div className="flex h-full items-center justify-center text-muted-foreground">
-                    Waiting for logs...
+                    Aguardando logs...
                   </div>
                 ) : (
                   deployLogs.map((log) => (
@@ -754,7 +746,7 @@ export default function Deploy() {
               <h3 className="mb-4 font-semibold text-foreground">Deploy Details</h3>
               <dl className="space-y-3 text-sm">
                 <div className="flex justify-between">
-                  <dt className="text-muted-foreground">App Name</dt>
+                  <dt className="text-muted-foreground">Nome do app</dt>
                   <dd className="font-mono text-foreground">{formData.name}</dd>
                 </div>
                 <div className="flex justify-between">

@@ -20,6 +20,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { formatTime, stripAnsi } from '@/lib/format';
+import { LogLinesSkeleton } from '@/components/Skeletons';
 import api from '@/lib/api';
 import { wsClient } from '@/lib/websocket';
 import { toast } from 'sonner';
@@ -92,7 +93,7 @@ export default function Logs() {
       const data = await api.getApps();
       setApps(data);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to load apps');
+      toast.error(error.message || 'Erro ao carregar apps');
     } finally {
       setIsLoading(false);
     }
@@ -126,8 +127,11 @@ export default function Logs() {
   if (isLoading) {
     return (
       <Layout>
-        <div className="flex h-[50vh] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="flex h-[calc(100vh-8rem)] flex-col">
+          <div className="mb-4 h-9 w-56 animate-pulse rounded bg-secondary" />
+          <div className="flex-1 overflow-hidden rounded-xl border border-border bg-background">
+            <LogLinesSkeleton linhas={16} />
+          </div>
         </div>
       </Layout>
     );
@@ -139,7 +143,7 @@ export default function Logs() {
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Live Logs</h1>
+            <h1 className="text-3xl font-bold text-foreground">Logs ao vivo</h1>
             <p className="mt-1 text-muted-foreground">
               Real-time log streaming from PM2 processes
             </p>
@@ -152,12 +156,12 @@ export default function Logs() {
               {isStreaming ? (
                 <>
                   <Pause className="h-4 w-4" />
-                  Pause
+                  Pausar
                 </>
               ) : (
                 <>
                   <Play className="h-4 w-4" />
-                  Resume
+                  Retomar
                 </>
               )}
             </Button>
@@ -177,7 +181,7 @@ export default function Logs() {
           <div className="relative flex-1 min-w-[200px] max-w-md">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search logs..."
+              placeholder="Buscar nos logs..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9"
@@ -187,7 +191,7 @@ export default function Logs() {
             <Filter className="h-4 w-4 text-muted-foreground" />
             <Select value={selectedApp} onValueChange={setSelectedApp}>
               <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All apps" />
+                <SelectValue placeholder="Todos os apps" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Apps</SelectItem>
@@ -198,7 +202,7 @@ export default function Logs() {
             </Select>
             <Select value={selectedLevel} onValueChange={setSelectedLevel}>
               <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="All levels" />
+                <SelectValue placeholder="Todos os níveis" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Levels</SelectItem>
@@ -232,7 +236,7 @@ export default function Logs() {
           <div className="h-full overflow-auto p-4 font-mono text-sm terminal-scroll">
             {filteredLogs.length === 0 ? (
               <div className="flex h-full items-center justify-center text-muted-foreground">
-                {logs.length === 0 ? 'Waiting for logs...' : 'No logs match your filters'}
+                {logs.length === 0 ? 'Aguardando logs...' : 'Nenhum log corresponde aos filtros'}
               </div>
             ) : (
               filteredLogs.map((log) => (

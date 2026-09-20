@@ -14,6 +14,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { EnvEditor } from '@/components/apps/EnvEditor';
 import api from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -234,15 +235,13 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
         </p>
       ) : null}
 
-      <div className="space-y-1">
-        <Label className="text-xs">Env do service (vira {app.appDir || '.'}/.env)</Label>
-        <textarea
-          value={envVars}
-          onChange={(e) => setEnvVars(e.target.value)}
-          className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
-          placeholder="NEXT_PUBLIC_API_URL=..."
-        />
-      </div>
+      <EnvEditor
+        value={envVars}
+        onChange={setEnvVars}
+        baseline={app.envVars || ''}
+        label="Env do service"
+        description={`Vira o arquivo ${app.appDir || '.'}/.env da release.`}
+      />
     </div>
   );
 }

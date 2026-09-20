@@ -29,6 +29,11 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { AppFilters } from '@/components/dashboard/AppFilters';
+import { AppFiltersState, DEFAULT_APP_FILTERS, filterApps } from '@/lib/app-filters';
+import { AppCompactRow } from '@/components/dashboard/AppCompactRow';
+import { AppCardSkeleton, StatsCardSkeleton } from '@/components/Skeletons';
+import { ConfirmDeleteDialog } from '@/components/apps/ConfirmDeleteDialog';
 import { cn } from '@/lib/utils';
 import api from '@/lib/api';
 import { toast } from 'sonner';
@@ -43,6 +48,28 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [sslLoading, setSslLoading] = useState<string | null>(null);
+  // Preferências de visualização persistem: quem trabalha em lista compacta não quer
+  // voltar para cards a cada reload.
+  const [filters, setFilters] = useState<AppFiltersState>(() => {
+    try {
+      const raw = localStorage.getItem('deployhub:app-filters');
+      return raw ? { ...DEFAULT_APP_FILTERS, ...JSON.parse(raw), search: '' } : DEFAULT_APP_FILTERS;
+    } catch {
+      return DEFAULT_APP_FILTERS;
+    }
+  });
+
+  const updateFilters = (next: AppFiltersState) => {
+    setFilters(next);
+    try {
+      localStorage.setItem(
+        'deployhub:app-filters',
+        JSON.stringify({ status: next.status, type: next.type, view: next.view }),
+      );
+    } catch {
+      /* storage bloqueado — o filtro ainda vale na sessão */
+    }
+  };
   // Collapsed project cards, persisted as one map so a reload keeps the layout.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {
@@ -132,10 +159,19 @@ export default function Dashboard() {
   }, [loadData]);
 
   if (isLoading) {
+    // Esqueleto com o formato do conteúdo real: a tela não "pula" quando os dados
+    // chegam, e dá para ver o que está vindo.
     return (
       <Layout>
-        <div className="flex h-[50vh] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="mb-6 md:mb-8 grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <StatsCardSkeleton key={index} />
+          ))}
+        </div>
+        <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <AppCardSkeleton key={index} />
+          ))}
         </div>
       </Layout>
     );
@@ -179,8 +215,12 @@ export default function Dashboard() {
   };
 
   const projectIds = new Set(projects.map((p) => p.id));
-  const standaloneApps = apps.filter((a) => !a.projectId || !projectIds.has(a.projectId));
-  const appsByProject = (pid: string) => apps.filter((a) => a.projectId === pid);
+  const visibleApps = filterApps(apps, filters);
+  const standaloneApps = visibleApps.filter((a) => !a.projectId || !projectIds.has(a.projectId));
+  const appsByProject = (pid: string) => visibleApps.filter((a) => a.projectId === pid);
+  const isCompact = filters.view === 'compact';
+  /** Projeto só aparece se algum service dele passou pelo filtro. */
+  const visibleProjects = projects.filter((project) => appsByProject(project.id).length > 0);
 
   return (
     <Layout>
@@ -229,11 +269,16 @@ export default function Dashboard() {
 
       <div className="grid gap-6 md:gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 space-y-4">
             <h2 className="text-lg md:text-xl font-semibold text-foreground">Aplicações</h2>
-            <span className="text-xs md:text-sm text-muted-foreground">
-              {apps.length} apps · ~/apps
-            </span>
+            {apps.length > 0 && (
+              <AppFilters
+                value={filters}
+                onChange={updateFilters}
+                showing={visibleApps.length}
+                total={apps.length}
+              />
+            )}
           </div>
           {apps.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border p-8 md:p-12 text-center">
@@ -244,7 +289,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-6">
-              {projects.map((project) => {
+              {visibleProjects.map((project) => {
                 const svcs = appsByProject(project.id);
                 const running = svcs.filter((a) => a.status === 'running').length;
                 const errored = svcs.filter((a) => a.status === 'error').length;
@@ -281,49 +326,72 @@ export default function Dashboard() {
                         <Button size="sm" variant="outline" onClick={() => api.redeployProject(project.id).then(() => toast.success('Redeploy iniciado')).catch((e) => toast.error(e.message))}>
                           Redeploy project
                         </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
+                        {/* Confirmação digitada: excluir um projeto derruba TODOS os
+                            services dele de uma vez. */}
+                        <ConfirmDeleteDialog
+                          name={project.name}
+                          title={`Excluir projeto ${project.name}?`}
+                          description={
+                            <>
+                              <p>
+                                Para e remove os {svcs.length} services do projeto — processos PM2,
+                                containers, configs do Nginx, arquivos em /var/www e o
+                                <span className="font-mono"> ~/apps/{project.name}</span> inteiro.
+                              </p>
+                              <p>Esta ação é irreversível.</p>
+                            </>
+                          }
+                          confirmLabel="Excluir projeto"
+                          onConfirm={() => handleDeleteProject(project)}
+                          trigger={
                             <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" title="Excluir projeto">
                               <Trash2 className="h-4 w-4" />
                             </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Excluir projeto {project.name}?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Isso vai parar e remover os {svcs.length} services do projeto
-                                (processos PM2, configs do Nginx, arquivos em /var/www e em ~/apps/{project.name}) e apagar
-                                os registros. Esta ação é irreversível.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                              <AlertDialogAction
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                onClick={() => handleDeleteProject(project)}
-                              >
-                                Excluir projeto
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                          }
+                        />
                       </div>
                     </div>
                     <CollapsibleContent>
-                      <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
-                        {svcs.map((app) => (
-                          <AppCard key={app.id} app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
-                        ))}
-                      </div>
+                      {isCompact ? (
+                        <div className="space-y-1.5">
+                          {svcs.map((app) => (
+                            <AppCompactRow key={app.id} app={app} />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+                          {svcs.map((app) => (
+                            <AppCard key={app.id} app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
+                          ))}
+                        </div>
+                      )}
                     </CollapsibleContent>
                   </Collapsible>
                 );
               })}
-              {standaloneApps.length > 0 && (
-                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
-                  {standaloneApps.map((app) => (
-                    <AppCard key={app.id} app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
-                  ))}
+              {standaloneApps.length > 0 &&
+                (isCompact ? (
+                  <div className="space-y-1.5">
+                    {standaloneApps.map((app) => (
+                      <AppCompactRow key={app.id} app={app} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+                    {standaloneApps.map((app) => (
+                      <AppCard key={app.id} app={app} onRefresh={loadData} lastUpdated={lastUpdated} />
+                    ))}
+                  </div>
+                ))}
+
+              {visibleApps.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border p-8 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum app corresponde aos filtros.
+                  </p>
+                  <Button variant="ghost" size="sm" className="mt-2" onClick={() => updateFilters(DEFAULT_APP_FILTERS)}>
+                    Limpar filtros
+                  </Button>
                 </div>
               )}
             </div>

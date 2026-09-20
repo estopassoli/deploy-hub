@@ -4,17 +4,8 @@ import { ArrowLeft, Loader2, RefreshCw, Save, ShieldCheck, Trash2 } from 'lucide
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
+import { ConfirmDeleteDialog } from '@/components/apps/ConfirmDeleteDialog';
+import { EnvEditor } from '@/components/apps/EnvEditor';
 import { AddServiceForm } from '@/components/projects/AddServiceForm';
 import { DeployLogPanel } from '@/components/projects/DeployLogPanel';
 import { ServiceConfigCard } from '@/components/projects/ServiceConfigCard';
@@ -158,54 +149,43 @@ export default function ProjectDetail() {
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={handleRedeployProject}>
               <RefreshCw className="h-4 w-4" />
-              Redeploy project
+              Redeploy do projeto
             </Button>
             <Button size="sm" variant="outline" disabled={sslLoading} onClick={handleGenerateSsl}>
               {sslLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
               Gerar SSL
             </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
+            <ConfirmDeleteDialog
+              name={project.name}
+              title={`Excluir projeto ${project.name}?`}
+              description={
+                <>
+                  <p>
+                    Para e remove os {services.length} services do projeto — processos PM2,
+                    containers, configs do Nginx, arquivos em /var/www e o
+                    <span className="font-mono"> ~/apps/{project.name}</span> inteiro.
+                  </p>
+                  <p>Esta ação é irreversível.</p>
+                </>
+              }
+              confirmLabel="Excluir projeto"
+              onConfirm={handleDeleteProject}
+              trigger={
                 <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" title="Excluir projeto">
                   <Trash2 className="h-4 w-4" />
                 </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Excluir projeto {project.name}?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Isso vai parar e remover os {services.length} services do projeto (processos PM2, configs do Nginx,
-                    arquivos em /var/www e em ~/apps/{project.name}) e apagar os registros. Esta ação é irreversível.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    onClick={handleDeleteProject}
-                  >
-                    Excluir projeto
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+              }
+            />
           </div>
         </div>
 
         <div className="rounded-xl border border-border bg-card p-4 md:p-6 space-y-3">
-          <div>
-            <Label htmlFor="penv">Env do projeto</Label>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Compartilhado por todos os services — vira o <span className="font-mono">.env</span> da raiz do monorepo.
-              Aplica no próximo deploy.
-            </p>
-          </div>
-          <textarea
-            id="penv"
+          <EnvEditor
             value={projectEnv}
-            onChange={(e) => setProjectEnv(e.target.value)}
-            className="flex min-h-[140px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-            placeholder="DATABASE_URL=...&#10;REDIS_URL=..."
+            onChange={setProjectEnv}
+            baseline={project.envVars || ''}
+            label="Env do projeto"
+            description="Compartilhado por todos os services — vira o .env da raiz do monorepo. Aplica no próximo deploy."
           />
           <div className="flex justify-end">
             <Button size="sm" variant="gradient" disabled={savingEnv} onClick={handleSaveEnv}>

@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { AppConfigModal } from './AppConfigModal';
 import { AppMetricsChart } from './AppMetricsChart';
+import { ConfirmDeleteDialog } from '@/components/apps/ConfirmDeleteDialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -213,11 +214,11 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
   const handleDelete = async () => {
     try {
       await api.deleteApp(app.id);
-      toast.success(`Deleted ${app.name}`);
+      toast.success(`${app.name} excluído`);
       setShowDeleteConfirm(false);
       onRefresh?.();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to delete');
+      toast.error(error.message || 'Erro ao excluir');
     }
   };
 
@@ -233,7 +234,14 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <div className={cn('h-2.5 w-2.5 md:h-3 md:w-3 flex-shrink-0 rounded-full', status.bg, app.status === 'running' && 'animate-pulse')} />
             <div className="min-w-0">
-              <h3 className="font-semibold text-sm md:text-base text-foreground truncate">{app.name}</h3>
+              {/* O card vira porta de entrada da página de detalhe, onde ficam as
+                  releases, os logs e as métricas deste app com o contexto em volta. */}
+              <Link
+                to={`/apps/${app.id}`}
+                className="block truncate text-sm font-semibold text-foreground hover:text-primary md:text-base"
+              >
+                {app.name}
+              </Link>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={cn('inline-flex items-center rounded px-1.5 py-0.5 text-[10px] md:text-xs font-medium', type.color)}>
                   {type.label}
@@ -250,15 +258,21 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem asChild>
-                <Link to={`/logs?app=${app.name}`} className="flex items-center gap-2">
+                <Link to={`/apps/${app.id}`} className="flex items-center gap-2">
+                  <ExternalLink className="h-4 w-4" />
+                  Abrir detalhes
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to={`/apps/${app.id}`} className="flex items-center gap-2">
                   <ScrollText className="h-4 w-4" />
-                  View Logs
+                  Ver logs
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link to={`/versions?app=${app.id}`} className="flex items-center gap-2">
                   <RotateCcw className="h-4 w-4" />
-                  Rollback
+                  Releases e rollback
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleOpenConfig} className="flex items-center gap-2">
@@ -278,23 +292,23 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
                 className="flex items-center gap-2 text-cyan-400 focus:text-cyan-400 focus:bg-cyan-400/10"
               >
                 <RefreshCw className={cn("h-4 w-4", isRedeploying && "animate-spin")} />
-                {isRedeploying ? 'Redeploying...' : 'Pull & Redeploy'}
+                {isRedeploying ? 'Deployando...' : 'Pull e redeploy'}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               {app.status === 'stopped' ? (
                 <DropdownMenuItem onClick={handleStart} className="flex items-center gap-2 text-success focus:text-success focus:bg-success/10">
                   <Play className="h-4 w-4" />
-                  Start
+                  Iniciar
                 </DropdownMenuItem>
               ) : (
                 <>
                   <DropdownMenuItem onClick={handleRestart} className="flex items-center gap-2">
                     <RotateCcw className="h-4 w-4" />
-                    Restart
+                    Reiniciar
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleStop} className="flex items-center gap-2">
                     <Square className="h-4 w-4" />
-                    Stop
+                    Parar
                   </DropdownMenuItem>
                 </>
               )}
@@ -304,7 +318,7 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
                 className="flex items-center gap-2 text-destructive focus:text-destructive focus:bg-destructive/10"
               >
                 <Trash2 className="h-4 w-4" />
-                Delete Process
+                Excluir app
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -314,7 +328,7 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
         <div className="p-3 md:p-4 space-y-2 md:space-y-3">
           {app.domain && (
             <div className="flex items-center justify-between text-xs md:text-sm gap-2">
-              <span className="text-muted-foreground flex-shrink-0">Domain</span>
+              <span className="text-muted-foreground flex-shrink-0">Domínio</span>
               <a 
                 href={`https://${app.domain}`} 
                 target="_blank" 
@@ -452,30 +466,29 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
       </Dialog>
 
       {/* Delete Confirmation */}
-      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <AlertDialogContent className="mx-4 sm:mx-auto max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-base sm:text-lg">
-              <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0" />
-              <span className="truncate">Delete {app.name}?</span>
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-xs sm:text-sm">
-              This action cannot be undone. This will permanently delete the application 
-              <strong className="text-foreground"> {app.name}</strong>, stop the PM2 process, 
-              and remove the Nginx configuration.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
-            <AlertDialogCancel className="w-full sm:w-auto">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleDelete}
-              className="w-full sm:w-auto bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/*
+        Confirmação por digitação em vez de um clique. Excluir aqui para o processo,
+        remove containers e imagens, apaga o vhost do Nginx, o /var/www/<app> e o
+        ~/apps/<app> inteiro — com todas as releases. Um clique errado no app errado é
+        um incidente de produção.
+      */}
+      <ConfirmDeleteDialog
+          open={showDeleteConfirm}
+          onOpenChange={setShowDeleteConfirm}
+          name={app.name}
+          description={
+            <>
+              <p>Esta ação é irreversível.</p>
+              <p>
+                Para o processo, remove containers e imagens, apaga o vhost do Nginx,
+                <span className="font-mono"> /var/www/{app.name}</span> e
+                <span className="font-mono"> ~/apps/{app.name}</span> — com todas as releases.
+              </p>
+            </>
+          }
+          confirmLabel={`Excluir ${app.name}`}
+          onConfirm={handleDelete}
+        />
 
       {/* Configuration Modal */}
       <AppConfigModal

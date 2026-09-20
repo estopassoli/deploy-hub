@@ -9,6 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import Deploy from "./pages/Deploy";
 import Project from "./pages/Project";
 import ProjectDetail from "./pages/ProjectDetail";
+import AppDetail from "./pages/AppDetail";
 import Logs from "./pages/Logs";
 import Versions from "./pages/Versions";
 import GitHub from "./pages/GitHub";
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/deploy" element={<ProtectedRoute><Deploy /></ProtectedRoute>} />
             <Route path="/projects/new" element={<ProtectedRoute><Project /></ProtectedRoute>} />
             <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
+            <Route path="/apps/:id" element={<ProtectedRoute><AppDetail /></ProtectedRoute>} />
             <Route path="/logs" element={<ProtectedRoute><Logs /></ProtectedRoute>} />
             <Route path="/versions" element={<ProtectedRoute><Versions /></ProtectedRoute>} />
             <Route path="/github" element={<ProtectedRoute><GitHub /></ProtectedRoute>} />
