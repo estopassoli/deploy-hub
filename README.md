@@ -128,6 +128,7 @@ O script realiza `git pull`, **verifica se `JWT_SECRET` está configurado** (abo
 | `DATABASE_URL` | String Prisma (SQLite, Postgres, etc.) | `file:./prisma/deployhub.db` |
 | `JWT_SECRET` | **Obrigatório.** Segredo usado para assinar tokens JWT — o backend não sobe sem ele. Gere com `openssl rand -hex 32` | _(sem default)_ |
 | `CORS_ORIGINS` | Origens permitidas no CORS da API e dos WebSockets, separadas por vírgula. Vazio = aceita qualquer origem (com aviso no boot) | `https://painel.seudominio.com` |
+| `ENV_ENCRYPTION_KEY` | Chave AES-256-GCM que criptografa `App.envVars` e `Project.envVars` no banco. Gerada automaticamente pelo `update.sh` se faltar. **Guarde junto com o backup do banco** | `openssl rand -hex 32` |
 | `REGISTRATION_SECRET` | Token exigido para criar novos usuários via API. **Sem ele, `/auth/register` responde 403** e o registro fica desabilitado | _(sem default)_ |
 | `WEBHOOK_SECRET` | Segredo HMAC para validar webhooks GitHub | gerado pelo `setup.sh` |
 | `APPS_DIR` | Diretório onde os apps são provisionados/clonados | `/root/apps` |
@@ -145,6 +146,27 @@ O script realiza `git pull`, **verifica se `JWT_SECRET` está configurado** (abo
 
 > Sempre reinicie o servidor correspondente após alterar o `.env`.
 
+## Segredos em repouso
+
+As variáveis de ambiente de cada app (`App.envVars`) e de cada projeto monorepo
+(`Project.envVars`) guardam o `.env` inteiro da aplicação — senha de banco, chave de API,
+segredo de JWT. Elas são criptografadas no banco com **AES-256-GCM**, usando
+`ENV_ENCRYPTION_KEY`.
+
+- A criptografia acontece na borda do Prisma, então vale para todos os caminhos de
+  leitura e escrita, inclusive código novo.
+- **Migração transparente:** valores gravados antes desta mudança continuam em texto puro,
+  são lidos normalmente e viram criptografados no próximo save. Para fechar a janela de
+  uma vez em apps que ninguém edita, o `update.sh` roda
+  `node scripts/encrypt-env-vars.mjs` (idempotente; aceita `--dry-run`).
+- Sem `ENV_ENCRYPTION_KEY` a criptografia fica **desligada** e o painel segue funcionando
+  com os valores em texto puro, avisando no boot.
+
+> ⚠️ **Guarde o `backend/.env` junto com o backup do banco.** Um backup do
+> `deployhub.db` sem a chave é inútil: os `envVars` não são recuperáveis. Se a chave for
+> perdida ou trocada, o deploy **falha com erro explícito** em vez de subir os apps sem
+> variável de ambiente nenhuma.
+
 ## Scripts úteis
 
 - `npm run dev` – executa o frontend Vite.
@@ -152,6 +174,8 @@ O script realiza `git pull`, **verifica se `JWT_SECRET` está configurado** (abo
 - `npm run start:dev` (backend) – inicia NestJS com watch.
 - `npm run seed` (backend) – popula usuário admin padrão.
 - `npx prisma studio` – inspeciona o banco localmente.
+- `node scripts/encrypt-env-vars.mjs` (backend) – criptografa variáveis de ambiente que ainda estejam em texto puro.
+- `node scripts/migration-baseline.mjs` (backend) – lista migrations legadas que precisam ser registradas.
 
 ## Próximos passos
 

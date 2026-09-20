@@ -299,6 +299,7 @@ generate_secrets() {
     JWT_SECRET=$(openssl rand -hex 32)
     REGISTRATION_SECRET=$(openssl rand -hex 16)
     WEBHOOK_SECRET=$(openssl rand -hex 32)
+    ENV_ENCRYPTION_KEY=$(openssl rand -hex 32)
 }
 
 # Clonar e configurar o DeployHub
@@ -328,6 +329,11 @@ JWT_SECRET=$JWT_SECRET
 
 # Origens permitidas no CORS da API e dos WebSockets (separadas por vírgula)
 CORS_ORIGINS=https://$FRONTEND_DOMAIN
+
+# Criptografia de App.envVars e Project.envVars (AES-256-GCM).
+# GUARDE ESTA CHAVE JUNTO COM O BACKUP DO BANCO — sem ela as variáveis de
+# ambiente dos apps não são recuperáveis.
+ENV_ENCRYPTION_KEY=$ENV_ENCRYPTION_KEY
 
 # Apps directory
 APPS_DIR=$APPS_DIR

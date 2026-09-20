@@ -22,6 +22,11 @@ dist-ssr
 *.sln
 *.sw?
 backend/prisma/deployhub.db
+# Artefatos do SQLite e backups criados pelo update.sh antes de migrar
+backend/prisma/deployhub.db-journal
+backend/prisma/*.db-wal
+backend/prisma/*.db-shm
+backend/prisma/deployhub.db.bak-*
 
 .env
 backend/.env

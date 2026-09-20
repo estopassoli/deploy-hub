@@ -81,6 +81,28 @@ if ! grep -qE '^[[:space:]]*CORS_ORIGINS=.+' "$BACKEND_ENV"; then
     print_warning "Recomendado: echo \"CORS_ORIGINS=https://SEU-PAINEL\" >> $BACKEND_ENV"
 fi
 
+# 1.2 Chave de criptografia das variáveis de ambiente
+#
+# App.envVars e Project.envVars guardam o .env inteiro de cada aplicação (senha de
+# banco, chave de API) e ficavam em texto puro dentro do arquivo SQLite. A partir desta
+# versão eles são criptografados com AES-256-GCM.
+#
+# A chave é gerada automaticamente quando falta, porque exigir ação manual deixaria os
+# segredos em texto puro por tempo indeterminado. Instalações sem a chave continuam
+# funcionando (a criptografia fica desligada), mas sem proteção nenhuma.
+ENV_KEY_GERADA=false
+if ! grep -qE '^[[:space:]]*ENV_ENCRYPTION_KEY=.+' "$BACKEND_ENV"; then
+    print_status "Gerando ENV_ENCRYPTION_KEY (criptografia das variáveis de ambiente)..."
+    printf '\n# Criptografia de App.envVars e Project.envVars (AES-256-GCM)\n' >> "$BACKEND_ENV"
+    printf 'ENV_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 32)" >> "$BACKEND_ENV"
+    ENV_KEY_GERADA=true
+    print_success "ENV_ENCRYPTION_KEY criada em backend/.env"
+    echo ""
+    print_warning "GUARDE O backend/.env JUNTO COM O BACKUP DO BANCO."
+    print_warning "Sem essa chave as variáveis de ambiente dos apps não são recuperáveis."
+    echo ""
+fi
+
 # 2. Atualizar dependências do Frontend
 print_status "Atualizando dependências do frontend..."
 npm install
@@ -202,6 +224,22 @@ fi
 print_status "Compilando backend..."
 npm run build
 print_success "Backend compilado"
+
+# 8.1 Criptografar as variáveis de ambiente que ainda estiverem em texto puro
+#
+# A migração também acontece sozinha no próximo save de cada app, mas "o próximo save"
+# pode nunca chegar para um app que ninguém edita — e é justamente o .env dele que
+# continuaria legível num backup. Fazer aqui fecha a janela de uma vez.
+if [ -f scripts/encrypt-env-vars.mjs ]; then
+    print_status "Criptografando variáveis de ambiente ainda em texto puro..."
+    set -a; . "$BACKEND_ENV"; set +a
+    if node scripts/encrypt-env-vars.mjs; then
+        print_success "Variáveis de ambiente protegidas"
+    else
+        print_warning "Não foi possível criptografar agora — os valores seguem funcionando em texto puro."
+        print_warning "Rode manualmente depois: cd backend && node scripts/encrypt-env-vars.mjs"
+    fi
+fi
 
 # 9. Reiniciar serviço via PM2
 print_status "Reiniciando serviço do backend..."
