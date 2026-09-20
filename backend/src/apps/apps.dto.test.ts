@@ -79,6 +79,8 @@ test('UpdateAppDto preserva todos os campos que a UI envia', async () => {
     containerPort: 8080,
     dockerContext: '.',
     healthPath: '/health',
+    maxMemoryMb: 512,
+    cpuLimit: 1.5,
   };
 
   const result = await run(UpdateAppDto, body);
@@ -116,6 +118,8 @@ test('UpdateAppDto deixa campo ausente como undefined num update parcial', async
     'containerPort',
     'dockerContext',
     'healthPath',
+    'maxMemoryMb',
+    'cpuLimit',
   ]) {
     assert.equal(result[field], undefined, `${field} não pode ganhar valor num update parcial`);
   }
@@ -277,4 +281,26 @@ test('CreateAppDto aceita as formas legítimas de repositório', async () => {
     });
     assert.equal(result.repository, repository);
   }
+});
+
+// --- limites de recurso (Fase 6.4) ---------------------------------------------
+
+test('UpdateAppDto converte e valida os limites de recurso', async () => {
+  const result = await run(UpdateAppDto, { maxMemoryMb: '512', cpuLimit: '0,5' });
+  assert.equal(result.maxMemoryMb, 512);
+  assert.equal(result.cpuLimit, 0.5, 'aceita vírgula decimal');
+});
+
+test('UpdateAppDto trata limite vazio como "sem limite"', async () => {
+  const result = await run(UpdateAppDto, { maxMemoryMb: '', cpuLimit: '' });
+  assert.equal(result.maxMemoryMb, null);
+  assert.equal(result.cpuLimit, null);
+});
+
+test('UpdateAppDto rejeita limite fora da faixa', async () => {
+  // 32MB não sobe processo Node nenhum; 0.05 CPU deixaria o app inutilizável.
+  assert.match(await expectRejection(UpdateAppDto, { maxMemoryMb: 32 }), /maxMemoryMb|Memória mínima/);
+  assert.match(await expectRejection(UpdateAppDto, { maxMemoryMb: 999999 }), /maxMemoryMb/);
+  assert.match(await expectRejection(UpdateAppDto, { cpuLimit: 0.01 }), /cpuLimit/);
+  assert.match(await expectRejection(UpdateAppDto, { cpuLimit: 'muito' }), /cpuLimit/);
 });

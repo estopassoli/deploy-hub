@@ -30,6 +30,7 @@ import { PhaseTracker } from './phase-tracker';
 import { normalizeHealthPath, waitForHealthy } from './health-check';
 import { classifyMigrationOutcome, describeMigrationOutcome } from './migration-outcome';
 import { isStaticPreset, presetOutputDir } from './app-presets';
+import { describeLimits, dockerLimitFlags, pm2MaxMemory } from './resource-limits';
 import { describeEnvDiff, diffEnv } from './env-diff';
 import { decidePm2Strategy } from './pm2-strategy';
 import {
@@ -1739,9 +1740,14 @@ export class DeployService implements OnModuleInit {
       await removeContainer(name);
     }
 
-    this.log(key, `▶ [${app.name}] docker run → 127.0.0.1:${app.port} → :${containerPort}`, deployId);
+    const limitFlags = dockerLimitFlags(app);
+    this.log(
+      key,
+      `▶ [${app.name}] docker run → 127.0.0.1:${app.port} → :${containerPort} (${describeLimits(app)})`,
+      deployId,
+    );
     await this.runCommand(
-      runContainerCmd({ name, image: tag, hostPort: app.port, containerPort, envFile: envPath }),
+      runContainerCmd({ name, image: tag, hostPort: app.port, containerPort, envFile: envPath, limitFlags }),
       releaseDir,
       key,
       deployId,
@@ -1969,7 +1975,7 @@ module.exports = {
     instances: 1,
     autorestart: true,
     watch: false,
-    max_memory_restart: '1G',
+    max_memory_restart: '${pm2MaxMemory(app.maxMemoryMb)}',
     env: {
 ${envString}
     }

@@ -91,7 +91,7 @@ class ApiClient {
     });
   }
 
-  async updateApp(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; runtime?: string; containerPort?: number | string | null; dockerContext?: string; healthPath?: string }) {
+  async updateApp(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; runtime?: string; containerPort?: number | string | null; dockerContext?: string; healthPath?: string; maxMemoryMb?: number | string | null; cpuLimit?: number | string | null }) {
     return this.request<any>(`/apps/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),

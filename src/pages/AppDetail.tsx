@@ -75,6 +75,8 @@ export default function AppDetail() {
     containerPort: '',
     dockerContext: '',
     healthPath: '',
+    maxMemoryMb: '',
+    cpuLimit: '',
   });
   const [savedEnv, setSavedEnv] = useState('');
 
@@ -103,6 +105,8 @@ export default function AppDetail() {
             containerPort: data.containerPort != null ? String(data.containerPort) : '',
             dockerContext: data.dockerContext || '',
             healthPath: data.healthPath || '',
+            maxMemoryMb: data.maxMemoryMb != null ? String(data.maxMemoryMb) : '',
+            cpuLimit: data.cpuLimit != null ? String(data.cpuLimit) : '',
           });
         }
       } catch (error: any) {
@@ -500,6 +504,42 @@ export default function AppDetail() {
                 placeholder="/"
                 hint="Checado em 127.0.0.1 após o start. Sem resposta, o deploy volta para a release anterior."
               />
+            </div>
+
+            {/* Limites de recurso */}
+            <div className="space-y-3 rounded-xl border border-border bg-card p-4 md:p-6">
+              <h3 className="font-semibold text-foreground">Limites de recurso</h3>
+              <p className="text-sm text-muted-foreground">
+                Num servidor com vários apps, um vazamento de memória em um consome a RAM da
+                máquina inteira e o OOM killer do Linux escolhe a vítima — normalmente o processo
+                maior, não o culpado. Um teto por app transforma "o servidor caiu" em "um app
+                reiniciou". Vazio = sem limite.
+              </p>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label="Memória máxima (MB)"
+                  value={config.maxMemoryMb}
+                  onChange={(v) => setConfig({ ...config, maxMemoryMb: v })}
+                  placeholder="512"
+                  hint={
+                    app.activeRuntime === 'docker'
+                      ? 'No Docker, ultrapassar faz o kernel MATAR o container (ele volta pelo restart).'
+                      : 'No PM2, ultrapassar REINICIA o processo — interrupção curta, o app volta sozinho.'
+                  }
+                />
+                <Field
+                  label="Limite de CPU"
+                  value={config.cpuLimit}
+                  onChange={(v) => setConfig({ ...config, cpuLimit: v })}
+                  placeholder="0.5"
+                  hint={
+                    app.activeRuntime === 'docker'
+                      ? '0.5 = meio núcleo. Só vale em Docker.'
+                      : 'Só tem efeito em runtime Docker — o PM2 não limita CPU.'
+                  }
+                />
+              </div>
             </div>
 
             <SaveBar

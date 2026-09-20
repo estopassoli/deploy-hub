@@ -184,6 +184,8 @@ export function runContainerCmd(o: {
   containerPort: number;
   envFile?: string | null;
   restart?: string;
+  /** Flags de limite de recurso já montadas (ver resource-limits.ts). */
+  limitFlags?: string[];
 }): string {
   const parts = [
     'docker', 'run', '-d',
@@ -191,6 +193,9 @@ export function runContainerCmd(o: {
     '--restart', shq(o.restart || 'unless-stopped'),
     '--label', shq(`${OWNER_LABEL}=${o.name}`),
   ];
+  // Os limites são gerados por resource-limits.ts a partir de números já validados —
+  // não há string de usuário aqui, então não precisam passar por shq.
+  if (o.limitFlags?.length) parts.push(...o.limitFlags);
   if (o.envFile) parts.push('--env-file', shq(o.envFile));
   parts.push('-p', shq(`127.0.0.1:${o.hostPort}:${o.containerPort}`));
   parts.push(shq(o.image));

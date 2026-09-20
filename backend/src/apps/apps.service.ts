@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import { assertInside, assertSafeName } from '../common/paths';
 import { run, runShell, sudo } from '../common/run';
 import { isStaticPreset } from '../deploy/app-presets';
+import { dockerLimitFlags } from '../deploy/resource-limits';
 import { proxyVhostConfig, staticVhostConfig } from '../deploy/nginx-config';
 import {
   appState,
@@ -216,7 +217,7 @@ export class AppsService {
     return app;
   }
 
-  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; runtime?: string; containerPort?: number | string | null; dockerContext?: string; healthPath?: string }) {
+  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; runtime?: string; containerPort?: number | string | null; dockerContext?: string; healthPath?: string; maxMemoryMb?: number | null; cpuLimit?: number | null }) {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
@@ -257,6 +258,9 @@ export class AppsService {
     // Caminho checado pelo health check depois do start. Vazio volta a null, que o
     // pipeline lê como '/'.
     if (data.healthPath !== undefined) updateData.healthPath = data.healthPath || null;
+    // Limites de recurso: null = sem teto (comportamento anterior).
+    if (data.maxMemoryMb !== undefined) updateData.maxMemoryMb = data.maxMemoryMb ?? null;
+    if (data.cpuLimit !== undefined) updateData.cpuLimit = data.cpuLimit ?? null;
 
     const updated = await this.prisma.app.update({
       where: { id },
@@ -547,6 +551,9 @@ export class AppsService {
         hostPort: app.port,
         containerPort,
         envFile: fs.existsSync(envFile) ? envFile : null,
+        // O rollback precisa reaplicar os limites: sem isso, voltar para uma release
+        // anterior subiria o container sem teto de memória.
+        limitFlags: dockerLimitFlags(app),
       }),
     );
   }

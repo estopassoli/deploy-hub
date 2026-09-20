@@ -48,6 +48,14 @@ model App {
   // mesmo com app caído.
   desiredState     String    @default("running")
 
+  // Limites de recurso (Fase 6.4). Null = sem limite explícito.
+  //
+  // No PM2 vira `max_memory_restart`; no Docker, `--memory` e `--cpus`. A diferença de
+  // semântica é relevante e está documentada em resource-limits.ts: o PM2 REINICIA o
+  // processo ao ultrapassar, o Docker MATA o container.
+  maxMemoryMb      Int?
+  cpuLimit         Float?
+
   // Monitoramento externo (Fase 6.3). Só faz sentido para app com domínio.
   uptimeEnabled    Boolean   @default(true)
   lastUptimeStatus String?   // up | down

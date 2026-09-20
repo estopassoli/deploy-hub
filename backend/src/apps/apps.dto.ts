@@ -27,6 +27,7 @@ import { Transform } from 'class-transformer';
 import {
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
@@ -40,6 +41,14 @@ import {
   NAME_PATTERN,
 } from '../common/validation.ts';
 import { APP_PRESET_IDS } from '../deploy/app-presets.ts';
+import {
+  MAX_CPU,
+  MAX_MEMORY_MB,
+  MIN_CPU,
+  MIN_MEMORY_MB,
+  normalizeCpuLimit,
+  normalizeMemoryMb,
+} from '../deploy/resource-limits.ts';
 import { IsSafeRepositoryUrl } from '../common/validation-decorators.ts';
 
 /**
@@ -106,6 +115,8 @@ export class UpdateAppDto {
   containerPort?: number | null;
   dockerContext?: string;
   healthPath?: string;
+  maxMemoryMb?: number | null;
+  cpuLimit?: number | null;
 }
 
 export class CreateAppDto {
@@ -212,4 +223,26 @@ apply(
   IsOptional() as PropDecorator,
   IsString() as PropDecorator,
   Matches(BRANCH_PATTERN, { message: 'branch contém caracteres inválidos' }) as PropDecorator,
+);
+
+// --- limites de recurso (Fase 6.4) ---------------------------------------------
+
+apply(
+  UpdateAppDto,
+  'maxMemoryMb',
+  Transform(({ value }) => normalizeMemoryMb(value)) as PropDecorator,
+  IsOptional() as PropDecorator,
+  IsInt({ message: 'maxMemoryMb deve ser um número inteiro de megabytes' }) as PropDecorator,
+  Min(MIN_MEMORY_MB, { message: `Memória mínima: ${MIN_MEMORY_MB}MB` }) as PropDecorator,
+  Max(MAX_MEMORY_MB) as PropDecorator,
+);
+
+apply(
+  UpdateAppDto,
+  'cpuLimit',
+  Transform(({ value }) => normalizeCpuLimit(value)) as PropDecorator,
+  IsOptional() as PropDecorator,
+  IsNumber({}, { message: 'cpuLimit deve ser um número (0.5 = meio núcleo)' }) as PropDecorator,
+  Min(MIN_CPU) as PropDecorator,
+  Max(MAX_CPU) as PropDecorator,
 );
