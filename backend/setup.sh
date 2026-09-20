@@ -323,8 +323,11 @@ NODE_ENV=production
 # Database (SQLite)
 DATABASE_URL="file:./prisma/deployhub.db"
 
-# JWT Secret
+# JWT Secret (obrigatório - o backend não sobe sem ele)
 JWT_SECRET=$JWT_SECRET
+
+# Origens permitidas no CORS da API e dos WebSockets (separadas por vírgula)
+CORS_ORIGINS=https://$FRONTEND_DOMAIN
 
 # Apps directory
 APPS_DIR=$APPS_DIR
@@ -354,9 +357,16 @@ EOF
     npm install
     
     # Gerar cliente Prisma e rodar migrations
+    #
+    # `migrate deploy` e não `db push`: o db push deixa o schema certo mas não registra
+    # nada em _prisma_migrations, e era essa a razão de o update.sh não conseguir migrar
+    # bancos existentes. Instalação nova já nasce com o histórico completo.
     print_info "Configurando banco de dados..."
     npx prisma generate
-    npx prisma db push 2>/dev/null
+    if ! npx prisma migrate deploy; then
+        print_error "Falha ao aplicar as migrations do banco."
+        exit 1
+    fi
     
     # Criar usuário admin
     print_info "Criando usuário admin..."

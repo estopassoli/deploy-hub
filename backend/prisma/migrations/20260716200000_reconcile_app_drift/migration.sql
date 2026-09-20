@@ -1,34 +1,25 @@
--- Reconcile schema drift: the following columns/tables existed in schema.prisma
--- (and in db-push/reset-managed databases) but were never captured by a migration.
--- Adding them here puts them in migration history so the later App table rebuild
--- (20260716215020_add_projects) copies their data instead of dropping it.
-
--- AlterTable
-ALTER TABLE "App" ADD COLUMN "buildCommand" TEXT;
-ALTER TABLE "App" ADD COLUMN "envVars" TEXT;
-ALTER TABLE "App" ADD COLUMN "installCommand" TEXT;
-ALTER TABLE "App" ADD COLUMN "migrateCommand" TEXT;
-ALTER TABLE "App" ADD COLUMN "startCommand" TEXT;
-
--- CreateTable
-CREATE TABLE "AppMetric" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "appId" TEXT NOT NULL,
-    "cpu" REAL NOT NULL DEFAULT 0,
-    "memory" REAL NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "AppMetric_appId_fkey" FOREIGN KEY ("appId") REFERENCES "App" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
-
--- CreateTable
-CREATE TABLE "SystemSettings" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "emailEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "emailRecipient" TEXT,
-    "slackWebhook" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
-);
-
--- CreateIndex
-CREATE INDEX "AppMetric_appId_createdAt_idx" ON "AppMetric"("appId", "createdAt");
+-- No-op intencional. NÃO reintroduza SQL aqui.
+--
+-- Histórico: esta migration foi escrita para bancos gerenciados por `prisma db push`,
+-- onde 20260625105121_init nunca chegou a ser registrada em _prisma_migrations. Ela
+-- repetia, byte a byte, o mesmo SQL daquela migration (as 5 colunas de comando em App,
+-- as tabelas AppMetric e SystemSettings e o índice de AppMetric), para que o rebuild da
+-- tabela App em 20260716215020_add_projects copiasse esses dados em vez de descartá-los.
+--
+-- O efeito colateral era que a cadeia de migrations parava de aplicar num banco limpo:
+--
+--     $ npx prisma migrate deploy
+--     Error: P3018 ... Migration name: 20260716200000_reconcile_app_drift
+--     Database error: duplicate column name: buildCommand
+--
+-- ou seja, nenhuma instalação nova conseguia criar o banco por migrations, e nenhum
+-- banco existente conseguia sair do `db push` para o `migrate deploy`.
+--
+-- Como 20260625105121_init já contém exatamente este SQL e vem antes na ordem, o passo
+-- correto aqui é não fazer nada. O arquivo continua existindo (e o nome continua no
+-- histórico) porque removê-lo quebraria qualquer banco que já a tenha registrado.
+--
+-- Bancos antigos criados por `db push` não têm histórico nenhum: o update.sh os registra
+-- uma única vez com `prisma migrate resolve --applied`, que grava só metadados e não
+-- toca em dado nenhum.
+SELECT 1;

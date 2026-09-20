@@ -106,13 +106,15 @@ cd /caminho/do/deployhub
 sudo bash update.sh
 ```
 
-O script realiza `git pull`, reinstala dependências do frontend/backend, recompila, copia o build para `/var/www/deployhub-panel`, aplica migrações Prisma e reinicia o processo `deployhub-backend` via PM2.
+O script realiza `git pull`, **verifica se `JWT_SECRET` está configurado** (abortando antes de tocar no serviço em execução, caso não esteja), reinstala dependências do frontend/backend, recompila, copia o build para `/var/www/deployhub-panel`, **faz backup do `backend/prisma/deployhub.db`**, aplica as migrações com `prisma migrate deploy` e reinicia o processo `deployhub-backend` via PM2.
+
+> **Banco de dados:** o `update.sh` usa exclusivamente `prisma migrate deploy`, que aplica apenas as migrations pendentes e **nunca reseta o banco**. Versões anteriores deste script usavam `prisma db push`, que ignora o histórico de migrations e pode descartar colunas e dados para forçar o schema — foi essa a origem da migration `20260716200000_reconcile_app_drift`. Se a migração falhar, o script para sem reiniciar o serviço e imprime como resolver com `prisma migrate resolve --applied`, sem perda de dados. Nunca rode `prisma migrate reset` nem `db push --accept-data-loss` nesta instalação.
 
 ### 2. Fluxo manual (caso precise auditar mudanças)
 
 1. `git fetch --all && git pull origin <branch>`
 2. Frontend: `npm install && npm run build && sudo rsync -av dist/ /var/www/deployhub-panel/`
-3. Backend: `cd backend && npm install && npx prisma generate && npx prisma migrate deploy && npm run build`
+3. Backend: `cd backend && npm install && npx prisma generate && cp prisma/deployhub.db prisma/deployhub.db.bak && npx prisma migrate deploy && npm run build`
 4. Reinicie o serviço `pm2 restart deployhub-backend && pm2 save`
 
 ## Variáveis de ambiente
@@ -124,8 +126,9 @@ O script realiza `git pull`, reinstala dependências do frontend/backend, recomp
 | `PORT` | Porta HTTP da API NestJS | `10001` |
 | `NODE_ENV` | `development` ou `production` | `production` |
 | `DATABASE_URL` | String Prisma (SQLite, Postgres, etc.) | `file:./prisma/deployhub.db` |
-| `JWT_SECRET` | Segredo usado para assinar tokens JWT | `deployhub-secret-key-change-in-production` |
-| `REGISTRATION_SECRET` | Token exigido para criar novos usuários via API | `deployhub-secret-2024` |
+| `JWT_SECRET` | **Obrigatório.** Segredo usado para assinar tokens JWT — o backend não sobe sem ele. Gere com `openssl rand -hex 32` | _(sem default)_ |
+| `CORS_ORIGINS` | Origens permitidas no CORS da API e dos WebSockets, separadas por vírgula. Vazio = aceita qualquer origem (com aviso no boot) | `https://painel.seudominio.com` |
+| `REGISTRATION_SECRET` | Token exigido para criar novos usuários via API. **Sem ele, `/auth/register` responde 403** e o registro fica desabilitado | _(sem default)_ |
 | `WEBHOOK_SECRET` | Segredo HMAC para validar webhooks GitHub | gerado pelo `setup.sh` |
 | `APPS_DIR` | Diretório onde os apps são provisionados/clonados | `/root/apps` |
 | `API_URL` | URL base usada pelo serviço de webhook para chamar a API interna | `https://api-panel.auraai.chat` (ajuste para seu host) |
