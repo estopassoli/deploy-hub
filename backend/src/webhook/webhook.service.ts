@@ -1,50 +1,73 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { DeployService } from '../deploy/deploy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PreviewService } from '../preview/preview.service';
 import { parseBranchEvent } from '../preview/branch-event';
+import {
+  decideWebhookAuth,
+  describeSignatureHeader,
+  parseAllowUnsigned,
+  verifySignature,
+} from './webhook-signature';
 
 @Injectable()
 export class WebhookService {
+  private readonly logger = new Logger('Webhook');
+
   constructor(
     private prisma: PrismaService,
     private deployService: DeployService,
     private previewService: PreviewService,
   ) { }
 
+  /**
+   * Recebe um webhook do GitHub.
+   *
+   * Nada do que entra aqui é logado com valor: nem o corpo, nem a assinatura recebida,
+   * nem a esperada. Ver `webhook-signature.ts` para o porquê — a versão anterior
+   * imprimia o HMAC correto a cada requisição, o que é material de replay para quem lê
+   * os logs do painel.
+   */
   async handleGitHubWebhook(appName: string, signature: string, event: string, payload: any, rawBody?: Buffer) {
-    console.log(`[Webhook] Received webhook for app: ${appName}`);
-    console.log(`[Webhook] Event: ${event}`);
-    console.log(`[Webhook] Signature received: ${signature}`);
-    
+    this.logger.log(
+      `Recebido para ${appName}: evento=${event} assinatura=${describeSignatureHeader(signature)}`,
+    );
+
     const app = await this.prisma.app.findUnique({ where: { name: appName } });
 
     if (!app) {
-      console.log(`[Webhook] App not found: ${appName}`);
+      this.logger.warn(`App não encontrado: ${appName}`);
       throw new BadRequestException('App não encontrado');
     }
 
-    console.log(`[Webhook] App found: ${app.name}, branch: ${app.branch}`);
+    const decisao = decideWebhookAuth({
+      hasSecret: Boolean(app.webhookSecret),
+      allowUnsigned: parseAllowUnsigned(process.env.WEBHOOK_ALLOW_UNSIGNED),
+      appName: app.name,
+    });
 
-    // Verify signature using raw body for accurate HMAC calculation
-    if (app.webhookSecret) {
-      const bodyToHash = rawBody ? rawBody.toString('utf8') : JSON.stringify(payload);
-      const expectedSignature = 'sha256=' + crypto
-        .createHmac('sha256', app.webhookSecret)
-        .update(bodyToHash)
-        .digest('hex');
+    if (decisao.action === 'reject') {
+      this.logger.error(decisao.reason);
+      await this.registrarFalhaDeAutenticacao(app.id, decisao.reason);
+      throw new UnauthorizedException(decisao.reason);
+    }
 
-      console.log(`[Webhook] Body to hash: ${bodyToHash}`);
-      console.log(`[Webhook] Expected signature: ${expectedSignature}`);
+    if (decisao.action === 'allow-unsigned') {
+      // O fallback grita a cada uso, de propósito: é para uma janela de transição, não
+      // para virar configuração permanente por esquecimento.
+      this.logger.warn(decisao.warning);
+      await this.registrarFalhaDeAutenticacao(app.id, decisao.warning, 'warn');
+    } else {
+      // O corpo cru é o que o GitHub assinou; reserializar o JSON muda bytes (ordem de
+      // chaves, espaços) e invalidaria assinaturas legítimas.
+      const corpo = rawBody ?? Buffer.from(JSON.stringify(payload), 'utf8');
 
-      if (signature !== expectedSignature) {
-        console.log(`[Webhook] Signature mismatch!`);
+      if (!verifySignature(app.webhookSecret!, signature, corpo)) {
+        this.logger.warn(`Assinatura inválida para ${appName}`);
+        await this.registrarFalhaDeAutenticacao(app.id, `Webhook rejeitado: assinatura inválida`);
         throw new UnauthorizedException('Assinatura inválida');
       }
-      console.log(`[Webhook] Signature verified!`);
-    } else {
-      console.log(`[Webhook] No webhook secret configured, skipping signature verification`);
     }
 
     const branchEvent = parseBranchEvent(event, payload);
@@ -74,6 +97,23 @@ export class WebhookService {
     );
 
     return { success: resultado.handled, message: resultado.message, preview: resultado.previewName };
+  }
+
+  /**
+   * Deixa a recusa visível no painel, não só no stdout do PM2.
+   *
+   * Um webhook rejeitado é silencioso do lado de quem operava o painel: o deploy
+   * simplesmente para de acontecer. Sem este registro, a causa só aparece para quem
+   * souber ler o log do processo.
+   */
+  private async registrarFalhaDeAutenticacao(
+    appId: string,
+    mensagem: string,
+    level: 'warn' | 'error' = 'error',
+  ): Promise<void> {
+    await this.prisma.systemLog
+      .create({ data: { level, message: mensagem, source: 'github', appId } })
+      .catch(() => undefined);
   }
 
   /** Deploy da branch configurada — o comportamento que o webhook sempre teve. */

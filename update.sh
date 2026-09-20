@@ -241,6 +241,30 @@ if [ -f scripts/encrypt-env-vars.mjs ]; then
     fi
 fi
 
+# 8.2 Avisar sobre apps que ficariam com o webhook quebrado
+#
+# O webhook agora recusa (401) uma requisição que não pode autenticar, em vez de
+# deployar sem credencial. Todo app criado pelo painel tem segredo; linhas antigas podem
+# não ter, e para essas o deploy automático pararia sem nenhum sinal visível.
+#
+# Este aviso existe para que a descoberta aconteça aqui, e não num deploy que não veio.
+if [ -f scripts/check-webhook-secrets.mjs ]; then
+    set -a; . "$BACKEND_ENV"; set +a
+    if APPS_SEM_SEGREDO=$(node scripts/check-webhook-secrets.mjs 2>/dev/null) && [ -n "$APPS_SEM_SEGREDO" ]; then
+        print_warning "Estes apps não têm segredo de webhook e terão o webhook RECUSADO (401):"
+        echo "$APPS_SEM_SEGREDO" | while read -r app_sem_segredo; do
+            [ -n "$app_sem_segredo" ] && echo "    - $app_sem_segredo"
+        done
+        echo ""
+        echo "  Para cada um: abra o app no painel, gere o segredo e configure-o no"
+        echo "  webhook do GitHub (Settings > Webhooks > Secret)."
+        echo ""
+        echo "  Se precisar de uma janela de transição, WEBHOOK_ALLOW_UNSIGNED=true em"
+        echo "  backend/.env restaura o comportamento antigo — mas qualquer um que saiba"
+        echo "  o nome do app poderá disparar deploys enquanto estiver ligado."
+    fi
+fi
+
 # 9. Reiniciar serviço via PM2
 print_status "Reiniciando serviço do backend..."
 if pm2 describe deployhub-backend > /dev/null 2>&1; then

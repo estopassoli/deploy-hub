@@ -133,6 +133,7 @@ O script realiza `git pull`, **verifica se `JWT_SECRET` está configurado** (abo
 | `ENV_ENCRYPTION_KEY` | Chave AES-256-GCM que criptografa `App.envVars` e `Project.envVars` no banco. Gerada automaticamente pelo `update.sh` se faltar. **Guarde junto com o backup do banco** | `openssl rand -hex 32` |
 | `REGISTRATION_SECRET` | Token exigido para criar novos usuários via API. **Sem ele, `/auth/register` responde 403** e o registro fica desabilitado | _(sem default)_ |
 | `WEBHOOK_SECRET` | Segredo HMAC para validar webhooks GitHub | gerado pelo `setup.sh` |
+| `WEBHOOK_ALLOW_UNSIGNED` | Fallback de transição: aceita webhook de app **sem** segredo. Ausente (padrão) = recusa com 401. Enquanto ligado, quem souber o nome do app dispara deploys | _(ausente)_ |
 | `APPS_DIR` | Diretório onde os apps são provisionados/clonados | `/root/apps` |
 | `API_URL` | URL base usada pelo serviço de webhook para chamar a API interna | `https://api-panel.auraai.chat` (ajuste para seu host) |
 | `SSH_HOST` | Host/IP acessado pelo controlador de webhooks para executar comandos remotos | _(obrigatório para deploy remoto)_ |
@@ -224,6 +225,29 @@ segura porta, disco e um processo no PM2 para sempre.
 
 Portas saem sempre de `PREVIEW_PORT_RANGE`. Se a faixa lotar, o preview falha com
 mensagem clara em vez de procurar porta em outro lugar e colidir com produção.
+
+## Autenticação dos webhooks
+
+Cada app tem um `webhookSecret` e o GitHub assina o corpo com ele (`X-Hub-Signature-256`).
+Três detalhes valem ser explícitos, porque as três versões erradas disso são silenciosas:
+
+- **A comparação é em tempo constante.** Comparar HMACs com `!==` vaza, pelo tempo de
+  resposta, quantos bytes iniciais estão certos — o que torna a assinatura forjável byte
+  a byte.
+- **Nenhum material de assinatura vai para o log.** Nem o corpo recebido, nem a
+  assinatura enviada, nem a esperada. Um HMAC correto no log é material de replay para
+  quem lê `/logs` no painel ou o arquivo do PM2.
+- **App sem segredo é recusado com 401.** Antes, a requisição passava direto: quem
+  soubesse o nome do app disparava deploys sem credencial.
+
+Todo app criado pelo painel nasce com segredo, então só linhas antigas podem estar sem.
+O `update.sh` lista esses apps antes de reiniciar o serviço, para que a descoberta
+aconteça na atualização e não num deploy que nunca veio. Para cada um: abra o app no
+painel, gere o segredo e configure-o em *Settings → Webhooks → Secret* no GitHub.
+
+Se precisar de uma janela de transição, `WEBHOOK_ALLOW_UNSIGNED=true` restaura o
+comportamento antigo. Ele registra um aviso no log do sistema a cada requisição aceita
+sem assinatura — de propósito, para não virar permanente por esquecimento.
 
 ## Scripts úteis
 
