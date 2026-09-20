@@ -1,12 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import * as fs from 'fs';
-import * as path from 'path';
+import { assertInside } from '../common/paths';
+import { run } from '../common/run';
 
-const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
 const RETENTION_DAYS = 30;
 
@@ -33,9 +31,15 @@ export class CleanupService {
     for (const deploy of oldDeploys) {
       try {
         // Remove directory
+        //
+        // `deploy.path` vem do banco e este job roda sozinho às 3h da manhã, sobre
+        // linhas que ninguém revisou. O assertInside recusa qualquer caminho que não
+        // esteja debaixo de APPS_DIR — inclusive o próprio APPS_DIR — antes de um
+        // `rm -rf` rodando como root.
         if (deploy.path && fs.existsSync(deploy.path)) {
-          await execAsync(`rm -rf ${deploy.path}`);
-          console.log(`Removido: ${deploy.path}`);
+          const releaseDir = assertInside(deploy.path, [APPS_DIR], 'diretório da release');
+          await run('rm', ['-rf', releaseDir]);
+          console.log(`Removido: ${releaseDir}`);
         }
 
         // Delete from database

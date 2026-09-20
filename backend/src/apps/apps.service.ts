@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { assertInside, assertSafeName } from '../common/paths';
+import { run, runShell, sudo } from '../common/run';
 import { proxyVhostConfig, staticVhostConfig } from '../deploy/nginx-config';
 import {
   appState,
@@ -24,8 +24,10 @@ import {
   parseExposedPort,
 } from '../deploy/docker';
 
-const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
+const WWW_DIR = '/var/www';
+const NGINX_AVAILABLE = '/etc/nginx/sites-available';
+const NGINX_ENABLED = '/etc/nginx/sites-enabled';
 
 /** True when the app is supervised by Docker rather than PM2 or plain static files. */
 function isDocker(app: { activeRuntime?: string | null }): boolean {
@@ -251,10 +253,14 @@ export class AppsService {
     // Stop whatever is supervising it. Both are attempted regardless of activeRuntime:
     // an app that moved between runtimes can have leftovers on the other side, and the
     // whole point of a delete is to leave nothing holding the port.
+    // O nome vira caminho de diretório, vhost do nginx e nome de processo. Uma linha
+    // antiga do banco com nome fora do padrão para aqui, antes de qualquer `rm -rf`.
+    const safeName = assertSafeName(app.name, 'nome do app');
+
     try {
-      console.log('[AppsService] Stopping PM2 process:', app.name);
-      await execAsync(`pm2 delete ${app.name}`);
-      await execAsync('pm2 save');
+      console.log('[AppsService] Stopping PM2 process:', safeName);
+      await run('pm2', ['delete', safeName]);
+      await run('pm2', ['save']);
     } catch (e) {
       console.log('[AppsService] PM2 delete error (may not exist):', e.message);
     }
@@ -269,27 +275,28 @@ export class AppsService {
 
     // Remove Nginx config
     try {
-      console.log('[AppsService] Removing Nginx config:', app.name);
-      await execAsync(`sudo rm -f /etc/nginx/sites-available/${app.name}.conf`);
-      await execAsync(`sudo rm -f /etc/nginx/sites-enabled/${app.name}.conf`);
-      await execAsync('sudo systemctl reload nginx');
+      console.log('[AppsService] Removing Nginx config:', safeName);
+      await sudo('rm', ['-f', path.join(NGINX_AVAILABLE, `${safeName}.conf`)]);
+      await sudo('rm', ['-f', path.join(NGINX_ENABLED, `${safeName}.conf`)]);
+      await sudo('systemctl', ['reload', 'nginx']);
     } catch (e) {
       console.log('[AppsService] Nginx remove error:', e.message);
     }
 
     // Remove app directory from ~/apps
     try {
-      const appDir = path.join(APPS_DIR, app.name);
+      const appDir = assertInside(path.join(APPS_DIR, safeName), [APPS_DIR], 'diretório do app');
       console.log('[AppsService] Removing app directory:', appDir);
-      await execAsync(`rm -rf ${appDir}`);
+      await run('rm', ['-rf', appDir]);
     } catch (e) {
       console.log('[AppsService] App directory remove error:', e.message);
     }
 
     // Remove /var/www/{app_name} directory (for static apps)
     try {
-      console.log('[AppsService] Removing /var/www/' + app.name);
-      await execAsync(`sudo rm -rf /var/www/${app.name}`);
+      const wwwDir = assertInside(path.join(WWW_DIR, safeName), [WWW_DIR], 'diretório estático');
+      console.log('[AppsService] Removing', wwwDir);
+      await sudo('rm', ['-rf', wwwDir]);
     } catch (e) {
       console.log('[AppsService] /var/www remove error:', e.message);
     }
@@ -322,13 +329,13 @@ export class AppsService {
 
     try {
       // First try to start if process exists in PM2
-      const { stdout: pm2List } = await execAsync('pm2 jlist');
+      const { stdout: pm2List } = await run('pm2', ['jlist']);
       const processes = JSON.parse(pm2List);
       const existsInPM2 = processes.some((p: any) => p.name === app.name);
 
       if (existsInPM2) {
         // Process exists, just start it
-        await execAsync(`pm2 start ${app.name}`);
+        await run('pm2', ['start', app.name]);
       } else {
         // Process doesn't exist in PM2, need to start from path
         const currentPath = app.currentPath || path.join(APPS_DIR, app.name, 'current');
@@ -340,25 +347,23 @@ export class AppsService {
           throw new Error(`App directory not found: ${currentPath}. Deploy the app first.`);
         }
 
-        // Determine start command based on app type
-        let startCmd: string;
-        const cwd = currentPath;
+        // Determine start command based on app type.
+        // Montado como argv: o nome do app e o caminho não passam mais pelo shell.
+        const base = ['--name', app.name, '--cwd', currentPath];
+        let startArgs: string[];
 
-        if (app.startCommand) {
-          // Use custom start command if configured
-          startCmd = `pm2 start "npm" --name "${app.name}" --cwd "${cwd}" -- run start`;
-        } else if (app.type === 'nextjs') {
-          startCmd = `pm2 start "node_modules/.bin/next" --name "${app.name}" --cwd "${cwd}" -- start --port ${app.port}`;
-        } else if (app.type === 'nestjs') {
-          startCmd = `pm2 start "npm" --name "${app.name}" --cwd "${cwd}" -- run start:prod`;
+        if (app.type === 'nextjs' && !app.startCommand) {
+          startArgs = ['start', 'node_modules/.bin/next', ...base, '--', 'start', '--port', String(app.port)];
+        } else if (app.type === 'nestjs' && !app.startCommand) {
+          startArgs = ['start', 'npm', ...base, '--', 'run', 'start:prod'];
         } else {
-          startCmd = `pm2 start "npm" --name "${app.name}" --cwd "${cwd}" -- run start`;
+          startArgs = ['start', 'npm', ...base, '--', 'run', 'start'];
         }
 
-        await execAsync(startCmd);
+        await run('pm2', startArgs);
       }
 
-      await execAsync('pm2 save');
+      await run('pm2', ['save']);
       await this.prisma.app.update({ where: { id }, data: { status: 'running' } });
       return { success: true };
     } catch (error) {
@@ -374,7 +379,7 @@ export class AppsService {
       if (isDocker(app)) {
         await stopApp(app.name);
       } else {
-        await execAsync(`pm2 stop ${app.name}`);
+        await run('pm2', ['stop', app.name]);
       }
       await this.prisma.app.update({ where: { id }, data: { status: 'stopped' } });
       return { success: true };
@@ -391,7 +396,7 @@ export class AppsService {
       if (isDocker(app)) {
         await restartContainers(app.name);
       } else {
-        await execAsync(`pm2 restart ${app.name}`);
+        await run('pm2', ['restart', app.name]);
       }
       return { success: true };
     } catch (error) {
@@ -421,13 +426,17 @@ export class AppsService {
     const currentLink = path.join(appDir, 'current');
 
     try {
-      await execAsync(`rm -f ${currentLink} && ln -s ${deploy.path} ${currentLink}`);
+      // Duas chamadas em vez de `rm -f ... && ln -s ...` num shell só: o efeito é o
+      // mesmo e nem o caminho da release nem o do symlink passam por interpretação.
+      const releasePath = assertInside(deploy.path, [APPS_DIR], 'caminho da release');
+      await run('rm', ['-f', currentLink]);
+      await run('ln', ['-s', releasePath, currentLink]);
 
       if (isDocker(app)) {
         await this.rollbackDocker(app, deploy);
       } else if (app.type !== 'vitejs') {
         // Restart PM2 if needed
-        await execAsync(`pm2 restart ${app.name}`);
+        await run('pm2', ['restart', app.name]);
       }
 
       // Update deploy flags
@@ -461,7 +470,8 @@ export class AppsService {
     if (assets.composeFile) {
       const bin = await composeBin();
       if (!bin) throw new Error('compose não está disponível neste host');
-      await execAsync(composeUpCmd(bin, { project: app.name, file: assets.composeFile }), {
+      // runShell porque docker.ts monta a string já escapando tudo com shq().
+      await runShell(composeUpCmd(bin, { project: app.name, file: assets.composeFile }), {
         cwd: path.dirname(assets.composeFile),
       });
       return;
@@ -481,7 +491,7 @@ export class AppsService {
     if (!containerPort) containerPort = app.port;
 
     await removeApp(app.name);
-    await execAsync(
+    await runShell(
       runContainerCmd({
         name: containerName(app.name),
         image: tag,
@@ -494,7 +504,7 @@ export class AppsService {
 
   private async getPM2Status(appName: string): Promise<{ status: string; uptime: string; cpu: number; memory: number }> {
     try {
-      const { stdout } = await execAsync(`pm2 jlist`);
+      const { stdout } = await run('pm2', ['jlist']);
       const processes = JSON.parse(stdout);
       const proc = processes.find((p: any) => p.name === appName);
 
@@ -513,7 +523,7 @@ export class AppsService {
       if (pid) {
         try {
           // Use ps to get real CPU and memory usage
-          const { stdout: psOutput } = await execAsync(`ps -p ${pid} -o %cpu,%mem --no-headers`);
+          const { stdout: psOutput } = await run('ps', ['-p', String(pid), '-o', '%cpu,%mem', '--no-headers']);
           const parts = psOutput.trim().split(/\s+/);
           if (parts.length >= 2) {
             cpu = parseFloat(parts[0]) || 0;
@@ -570,6 +580,7 @@ export class AppsService {
 
     const configPath = `/etc/nginx/sites-enabled/${app.name}.conf`;
     await fs.promises.writeFile(configPath, config);
-    await execAsync('nginx -t && nginx -s reload');
+    await run('nginx', ['-t']);
+    await run('nginx', ['-s', 'reload']);
   }
 }

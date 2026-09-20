@@ -2,11 +2,8 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployGateway } from '../deploy/deploy.gateway';
 import { EmailService } from '../email/email.service';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { run } from '../common/run';
 import { appState, appStats } from '../deploy/docker';
-
-const execAsync = promisify(exec);
 const COLLECT_INTERVAL = 30000; // 30 seconds
 const RETENTION_HOURS = 24; // Keep 24 hours of data
 
@@ -96,7 +93,7 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
           let memory = Math.round((proc.monit?.memory || 0) / 1024 / 1024);
           
           try {
-            const { stdout: psOutput } = await execAsync(`ps -p ${proc.pid} -o %cpu --no-headers`);
+            const { stdout: psOutput } = await run('ps', ['-p', String(proc.pid), '-o', '%cpu', '--no-headers']);
             cpu = parseFloat(psOutput.trim()) || 0;
           } catch {
             cpu = proc.monit?.cpu || 0;
@@ -150,7 +147,7 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
 
   private async getPM2Metrics(): Promise<any[]> {
     try {
-      const { stdout } = await execAsync('pm2 jlist');
+      const { stdout } = await run('pm2', ['jlist']);
       return JSON.parse(stdout);
     } catch {
       return [];

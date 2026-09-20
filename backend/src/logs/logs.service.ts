@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { PrismaService } from '../prisma/prisma.service';
+import { runCapture } from '../common/run';
 import { appLogs } from '../deploy/docker';
 
-const execAsync = promisify(exec);
+/** `pm2 logs` sem shell. O nome do app vem do banco e não é reinterpretado. */
+function pm2LogsArgs(appName: string, lines: number): string[] {
+    return ['logs', appName, '--lines', String(lines), '--nostream'];
+}
 
 @Injectable()
 export class LogsService {
@@ -33,9 +35,11 @@ export class LogsService {
         try {
             // A containerised app has no PM2 entry at all, so asking pm2 would return an
             // empty panel rather than the app's output.
+            // runCapture substitui o `2>&1 || true`: o que interessa aqui é o texto
+            // produzido, não o código de saída do pm2.
             const stdout = app.activeRuntime === 'docker'
                 ? await appLogs(app.name, lines)
-                : (await execAsync(`pm2 logs ${app.name} --lines ${lines} --nostream 2>&1 || true`)).stdout;
+                : await runCapture('pm2', pm2LogsArgs(app.name, lines));
             return this.parseLogOutput(stdout, app.name);
         } catch (error) {
             return [];
@@ -44,7 +48,7 @@ export class LogsService {
 
     async getPM2Logs(appName: string, lines: number = 100) {
         try {
-            const { stdout } = await execAsync(`pm2 logs ${appName} --lines ${lines} --nostream 2>&1 || true`);
+            const stdout = await runCapture('pm2', pm2LogsArgs(appName, lines));
             return this.parseLogOutput(stdout, appName);
         } catch (error) {
             return [];

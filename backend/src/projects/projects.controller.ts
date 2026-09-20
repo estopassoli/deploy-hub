@@ -1,12 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { BRANCH_PATTERN, NAME_MAX_LENGTH, NAME_PATTERN } from '../common/validation';
+import { IsSafeDomain, IsSafeRepositoryUrl } from '../common/validation-decorators';
 import { ProjectsService } from './projects.service';
 
 class DetectDto {
-  @IsString() repository: string;
-  @IsOptional() @IsString() branch?: string;
+  @IsSafeRepositoryUrl() repository: string;
+  @IsOptional() @IsString() @Matches(BRANCH_PATTERN, { message: 'branch contém caracteres inválidos' }) branch?: string;
 }
 
 class ServiceDto {
@@ -17,16 +19,22 @@ class ServiceDto {
   @IsOptional() @IsString() workspacePackage?: string;
   @IsString() @IsIn(['nestjs', 'nextjs', 'vitejs']) type: string;
   @IsNumber() @Transform(({ value }) => parseInt(value, 10)) port: number;
-  @IsOptional() @IsString() domain?: string;
+  @IsOptional() @IsSafeDomain() domain?: string;
   @IsOptional() @IsString() envVars?: string;
   @IsOptional() @IsString() migrateCommand?: string;
   @IsOptional() @IsString() startCommand?: string;
 }
 
 class CreateProjectDto {
-  @IsString() name: string;
-  @IsString() repository: string;
-  @IsOptional() @IsString() branch?: string;
+  // Mesmo raciocínio do nome de service: vira diretório, vhost e nome de processo.
+  @IsString()
+  @MaxLength(NAME_MAX_LENGTH)
+  @Matches(NAME_PATTERN, {
+    message: 'name deve conter apenas letras minúsculas, números e hífens, começando por letra ou número',
+  })
+  name: string;
+  @IsSafeRepositoryUrl() repository: string;
+  @IsOptional() @IsString() @Matches(BRANCH_PATTERN, { message: 'branch contém caracteres inválidos' }) branch?: string;
   @IsOptional() @IsString() envVars?: string;
   @IsOptional() @IsBoolean() @Transform(({ value }) => value === true || value === 'true') generateSSL?: boolean;
   @IsArray() @ValidateNested({ each: true }) @Type(() => ServiceDto) services: ServiceDto[];

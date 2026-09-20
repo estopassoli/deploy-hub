@@ -1,17 +1,24 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { promisify } from 'util';
+import { assertInside, assertSafeName } from '../common/paths';
+import { run, runQuiet, sudoQuiet } from '../common/run';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployService } from '../deploy/deploy.service';
 import { detectPackageManager } from '../deploy/package-manager';
 import { scanWorkspaceApps, filterAvailableServices } from './workspace-scan';
 import { removeApp, removeImages } from '../deploy/docker';
 
-const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
+const WWW_DIR = '/var/www';
+const NGINX_AVAILABLE = '/etc/nginx/sites-available';
+const NGINX_ENABLED = '/etc/nginx/sites-enabled';
+
+/** Argumentos de `git clone --depth 1 --branch <branch> <repo> <dir>`, sem shell. */
+function gitCloneArgs(branch: string, repository: string, target: string): string[] {
+  return ['clone', '--depth', '1', '--branch', branch, '--', repository, target];
+}
 
 interface ServiceInput {
   name: string;
@@ -34,12 +41,14 @@ export class ProjectsService {
     const tmp = path.join(APPS_DIR, '.detect', crypto.randomUUID());
     try {
       await fs.promises.mkdir(path.dirname(tmp), { recursive: true });
-      await execAsync(`git clone --depth 1 --branch ${branch} ${repository} ${tmp}`);
+      await run('git', gitCloneArgs(branch, repository, tmp));
       const pm = detectPackageManager(tmp);
       const services = scanWorkspaceApps(tmp);
       return { packageManager: pm.name, services };
     } finally {
-      await execAsync(`rm -rf ${tmp}`).catch(() => undefined);
+      // tmp é montado aqui mesmo a partir de APPS_DIR + uuid, mas o assertInside é
+      // barato e garante que uma mudança futura em APPS_DIR não abra um rm -rf solto.
+      await runQuiet('rm', ['-rf', assertInside(tmp, [APPS_DIR], 'diretório temporário')]);
     }
   }
 
@@ -92,10 +101,10 @@ export class ProjectsService {
     const tmp = path.join(APPS_DIR, '.detect', crypto.randomUUID());
     try {
       await fs.promises.mkdir(path.dirname(tmp), { recursive: true });
-      await execAsync(`git clone --depth 1 --branch ${project.branch} ${project.repository} ${tmp}`);
+      await run('git', gitCloneArgs(project.branch, project.repository, tmp));
       return { source: 'repo' as const, services: filterAvailableServices(scanWorkspaceApps(tmp), existing) };
     } finally {
-      await execAsync(`rm -rf ${tmp}`).catch(() => undefined);
+      await runQuiet('rm', ['-rf', assertInside(tmp, [APPS_DIR], 'diretório temporário')]);
     }
   }
 
@@ -220,14 +229,25 @@ export class ProjectsService {
     // Both supervisors are torn down regardless of activeRuntime: a service that moved
     // between runtimes can have leftovers on the other side, and a removal that leaves
     // a container holding the port breaks whatever is deployed there next.
-    await execAsync(`pm2 delete ${svc.name}`).catch(() => undefined);
-    await removeApp(svc.name).catch(() => undefined);
-    await removeImages(svc.name).catch(() => undefined);
-    await execAsync(`sudo rm -f /etc/nginx/sites-available/${svc.name}.conf /etc/nginx/sites-enabled/${svc.name}.conf`).catch(() => undefined);
-    await execAsync(`sudo rm -rf /var/www/${svc.name}`).catch(() => undefined);
-    await execAsync(`rm -f ${path.join(APPS_DIR, project.name, `${svc.name}.ecosystem.config.js`)} ${path.join(APPS_DIR, project.name, `${svc.name}.env`)}`).catch(() => undefined);
-    await execAsync('pm2 save').catch(() => undefined);
-    await execAsync('sudo systemctl reload nginx').catch(() => undefined);
+    const svcName = assertSafeName(svc.name, 'nome do service');
+    const projectName = assertSafeName(project.name, 'nome do projeto');
+
+    await runQuiet('pm2', ['delete', svcName]);
+    await removeApp(svcName).catch(() => undefined);
+    await removeImages(svcName).catch(() => undefined);
+    await sudoQuiet('rm', [
+      '-f',
+      path.join(NGINX_AVAILABLE, `${svcName}.conf`),
+      path.join(NGINX_ENABLED, `${svcName}.conf`),
+    ]);
+    await sudoQuiet('rm', ['-rf', assertInside(path.join(WWW_DIR, svcName), [WWW_DIR], 'diretório estático')]);
+    await runQuiet('rm', [
+      '-f',
+      path.join(APPS_DIR, projectName, `${svcName}.ecosystem.config.js`),
+      path.join(APPS_DIR, projectName, `${svcName}.env`),
+    ]);
+    await runQuiet('pm2', ['save']);
+    await sudoQuiet('systemctl', ['reload', 'nginx']);
     // AppMetric rows and this service's own Deploy rows (appId set) cascade on App delete
     // (onDelete: Cascade in schema.prisma). Project-level Deploy rows — including the
     // incremental deploys this service went through (projectId set, appId null) — are not
@@ -258,16 +278,26 @@ export class ProjectsService {
   async remove(id: string) {
     const project = await this.prisma.project.findUnique({ where: { id }, include: { apps: true } });
     if (!project) throw new NotFoundException('Projeto não encontrado');
+    const projectName = assertSafeName(project.name, 'nome do projeto');
+
     for (const svc of project.apps) {
-      await execAsync(`pm2 delete ${svc.name}`).catch(() => undefined);
-      await removeApp(svc.name).catch(() => undefined);
-      await removeImages(svc.name).catch(() => undefined);
-      await execAsync(`sudo rm -f /etc/nginx/sites-available/${svc.name}.conf /etc/nginx/sites-enabled/${svc.name}.conf`).catch(() => undefined);
-      await execAsync(`sudo rm -rf /var/www/${svc.name}`).catch(() => undefined);
+      const svcName = assertSafeName(svc.name, 'nome do service');
+      await runQuiet('pm2', ['delete', svcName]);
+      await removeApp(svcName).catch(() => undefined);
+      await removeImages(svcName).catch(() => undefined);
+      await sudoQuiet('rm', [
+        '-f',
+        path.join(NGINX_AVAILABLE, `${svcName}.conf`),
+        path.join(NGINX_ENABLED, `${svcName}.conf`),
+      ]);
+      await sudoQuiet('rm', ['-rf', assertInside(path.join(WWW_DIR, svcName), [WWW_DIR], 'diretório estático')]);
     }
-    await execAsync('pm2 save').catch(() => undefined);
-    await execAsync('sudo systemctl reload nginx').catch(() => undefined);
-    await execAsync(`rm -rf ${path.join(APPS_DIR, project.name)}`).catch(() => undefined);
+    await runQuiet('pm2', ['save']);
+    await sudoQuiet('systemctl', ['reload', 'nginx']);
+    await runQuiet('rm', [
+      '-rf',
+      assertInside(path.join(APPS_DIR, projectName), [APPS_DIR], 'diretório do projeto'),
+    ]);
     await this.prisma.project.delete({ where: { id } });
     return { success: true };
   }

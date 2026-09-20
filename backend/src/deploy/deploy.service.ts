@@ -1,9 +1,11 @@
 
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { exec, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { promisify } from 'util';
+import { assertInside, assertSafeName } from '../common/paths';
+import { run, runQuiet, sudo } from '../common/run';
+import { isSafeDomain } from '../common/validation';
 import { AppsService } from '../apps/apps.service';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,8 +48,23 @@ import {
 } from './docker';
 import type { DockerAssets, RuntimeKind } from './docker';
 
-const execAsync = promisify(exec);
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
+const WWW_DIR = '/var/www';
+const NGINX_AVAILABLE = '/etc/nginx/sites-available';
+const NGINX_ENABLED = '/etc/nginx/sites-enabled';
+
+/** Argumentos de `git clone --depth 1 --branch <branch> <repo> <dir>`, sem shell. */
+function gitCloneArgs(branch: string, repository: string, target: string): string[] {
+  // O `--` separa opções de operandos: sem ele, um repositório começando com '-' seria
+  // lido pelo git como flag (`--upload-pack=...` executa comando arbitrário). O DTO já
+  // recusa esse formato; isto é a segunda camada.
+  return ['clone', '--depth', '1', '--branch', branch, '--', repository, target];
+}
+
+/** Argumentos do certbot para um domínio, sem shell. */
+function certbotArgs(domain: string, email: string): string[] {
+  return ['--nginx', '-d', domain, '--non-interactive', '--agree-tos', '--email', email];
+}
 
 @Injectable()
 export class DeployService {
@@ -160,19 +177,20 @@ export class DeployService {
    */
   async generateSslForApp(app: any): Promise<{ domain: string | null; ok: boolean; error?: string }> {
     if (!app.domain) return { domain: null, ok: false, error: 'sem domínio' };
+    // O domínio vira argumento do certbot e server_name do nginx. Validar aqui recusa
+    // uma linha antiga do banco antes de ela virar argumento de um comando com sudo.
+    if (!isSafeDomain(app.domain)) {
+      return { domain: app.domain, ok: false, error: 'domínio inválido' };
+    }
     try {
-      await execAsync('which certbot');
+      await run('which', ['certbot']);
     } catch {
       return { domain: app.domain, ok: false, error: 'certbot não está instalado' };
     }
     const email = process.env.CERTBOT_EMAIL || `admin@${app.domain}`;
     try {
       this.log(app.name, `▶ Generating SSL for ${app.domain}...`);
-      await this.runCommand(
-        `sudo certbot --nginx -d ${app.domain} --non-interactive --agree-tos --email ${email}`,
-        '/tmp',
-        app.name,
-      );
+      await sudo('certbot', certbotArgs(app.domain, email), { cwd: '/tmp' });
       // Normalize the vhost to our format (:80 + :443) now that the cert exists.
       await this.updateNginxConfig(app);
       this.log(app.name, `✓ SSL ready for ${app.domain}`);
@@ -268,6 +286,20 @@ export class DeployService {
   }
 
   /**
+   * Escreve um arquivo .env com modo 0600.
+   *
+   * O conteúdo é o .env inteiro do app — senha de banco, chave de API, segredo de JWT.
+   * O default do Node é 0644, ou seja, legível por qualquer usuário da máquina; e no
+   * caso de um app estático o diretório da release chega a ser copiado para /var/www.
+   * O `chmod` explícito depois do write cobre o caso do arquivo já existir com o modo
+   * antigo, quando o `mode` do writeFile é ignorado.
+   */
+  private async writeEnvFile(filePath: string, contents: string): Promise<void> {
+    await fs.promises.writeFile(filePath, contents, { mode: 0o600 });
+    await fs.promises.chmod(filePath, 0o600);
+  }
+
+  /**
    * Parse env vars string to object for use in commands
    */
   private parseEnvVars(envVars?: string): Record<string, string> {
@@ -336,12 +368,12 @@ export class DeployService {
       this.log(app.name, '▶ Cloning repository...', deploy.id);
       this.log(app.name, `  ${app.repository}`, deploy.id);
       this.log(app.name, `  Branch: ${app.branch}`, deploy.id);
-      await execAsync(`git clone --depth 1 --branch ${app.branch} ${app.repository} ${releaseDir}`);
+      await run('git', gitCloneArgs(app.branch, app.repository, releaseDir));
       this.log(app.name, '✓ Repository cloned', deploy.id);
 
-      // Get commit info
-      const { stdout: commitHash } = await execAsync(`cd ${releaseDir} && git rev-parse --short HEAD`);
-      const { stdout: commitMessage } = await execAsync(`cd ${releaseDir} && git log -1 --pretty=%s`);
+      // Get commit info — `cwd` em vez de `cd ... &&` num shell.
+      const { stdout: commitHash } = await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: releaseDir });
+      const { stdout: commitMessage } = await run('git', ['log', '-1', '--pretty=%s'], { cwd: releaseDir });
 
       this.log(app.name, `  Commit: ${commitHash.trim()} - ${commitMessage.trim().substring(0, 50)}`, deploy.id);
 
@@ -373,10 +405,10 @@ export class DeployService {
       // Env vars are ALSO exported into every step's process env (see runCommand) and PM2 config.
       if (options.envVars) {
         this.log(app.name, '▶ Writing environment variables...', deploy.id);
-        await fs.promises.writeFile(path.join(releaseDir, '.env'), options.envVars);
+        await this.writeEnvFile(path.join(releaseDir, '.env'), options.envVars);
         if (appWorkDir !== releaseDir) {
           await fs.promises.mkdir(appWorkDir, { recursive: true });
-          await fs.promises.writeFile(path.join(appWorkDir, '.env'), options.envVars);
+          await this.writeEnvFile(path.join(appWorkDir, '.env'), options.envVars);
           this.log(app.name, `✓ Environment file written to repo root and ${appDir}/`, deploy.id);
         } else {
           this.log(app.name, '✓ Environment file created', deploy.id);
@@ -451,14 +483,15 @@ export class DeployService {
 
       // Update symlink
       this.log(app.name, '▶ Updating symlink...', deploy.id);
-      await execAsync(`rm -f ${currentLink} && ln -s ${releaseDir} ${currentLink}`);
+      await run('rm', ['-f', currentLink]);
+      await run('ln', ['-s', releaseDir, currentLink]);
       this.log(app.name, `✓ ${currentLink} → ${releaseDir}`, deploy.id);
 
       this.setPhase(app.name, 'starting');
       if (runtimeKind === 'docker') {
         // Switching runtimes between deploys: kill the PM2 process before the container
         // binds the same port.
-        await execAsync(`pm2 delete ${app.name}`).catch(() => undefined);
+        await runQuiet('pm2', ['delete', app.name]);
         await this.runDockerRelease({
           app,
           key: app.name,
@@ -482,25 +515,20 @@ export class DeployService {
         await fs.promises.writeFile(configPath, pm2Config);
 
         try {
-          await execAsync(`pm2 delete ${app.name}`);
+          await run('pm2', ['delete', app.name]);
           this.log(app.name, '  Stopped existing process', deploy.id);
         } catch { /* empty */ }
 
-        await execAsync(`pm2 start ${configPath}`);
-        await execAsync('pm2 save');
+        await run('pm2', ['start', configPath]);
+        await run('pm2', ['save']);
         this.log(app.name, `✓ PM2 process started on port ${app.port}`, deploy.id);
       } else {
         // For Vite.js static apps, copy dist to /var/www/{app_name}
         await this.stopDockerApp(app).catch(() => undefined);
         this.log(app.name, '▶ Copying dist to /var/www...', deploy.id);
-        const wwwDir = `/var/www/${app.name}`;
-        await execAsync(`sudo mkdir -p ${wwwDir}`);
-        await execAsync(`sudo rm -rf ${wwwDir}/*`);
-        const distDir = appDir ? `${currentLink}/${appDir}/dist` : `${currentLink}/dist`;
-        await execAsync(`sudo cp -r ${distDir}/* ${wwwDir}/`);
-        await execAsync(`sudo chown -R www-data:www-data ${wwwDir}`);
-        await execAsync(`sudo chmod -R 755 ${wwwDir}`);
-        this.log(app.name, `✓ Static files copied to ${wwwDir}`, deploy.id);
+        const distDir = appDir ? path.join(currentLink, appDir, 'dist') : path.join(currentLink, 'dist');
+        await this.publishStatic(app.name, distDir);
+        this.log(app.name, `✓ Static files copied to ${path.join(WWW_DIR, app.name)}`, deploy.id);
       }
 
       // Update Nginx
@@ -510,14 +538,15 @@ export class DeployService {
       this.log(app.name, `✓ Nginx configured${app.domain ? ` for ${app.domain}` : ''}`, deploy.id);
 
       // Generate SSL certificate with Certbot if requested
-      if (options.generateSSL && app.domain) {
+      if (options.generateSSL && app.domain && isSafeDomain(app.domain)) {
         this.log(app.name, '▶ Checking Certbot installation...', deploy.id);
         try {
-          await execAsync('which certbot');
+          await run('which', ['certbot']);
           this.log(app.name, '✓ Certbot is installed', deploy.id);
 
           this.log(app.name, '▶ Generating SSL certificate with Certbot...', deploy.id);
-          await this.runCommand(`sudo certbot --nginx -d ${app.domain} --non-interactive --agree-tos --email admin@${app.domain}`, '/tmp', app.name, deploy.id);
+          const email = process.env.CERTBOT_EMAIL || `admin@${app.domain}`;
+          await sudo('certbot', certbotArgs(app.domain, email), { cwd: '/tmp' });
           this.log(app.name, `✓ SSL certificate generated for ${app.domain}`, deploy.id);
         } catch (e) {
           if (e.message?.includes('which certbot')) {
@@ -530,6 +559,8 @@ export class DeployService {
         }
       } else if (options.generateSSL && !app.domain) {
         this.log(app.name, '  ⚠️ SSL generation skipped - no domain configured', deploy.id);
+      } else if (options.generateSSL && app.domain) {
+        this.log(app.name, `  ⚠️ SSL generation skipped - domínio inválido: ${app.domain}`, deploy.id);
       }
 
       // Mark deploy as success and persist logs
@@ -667,9 +698,9 @@ export class DeployService {
       // Clone once
       this.setPhase(key, 'cloning');
       this.log(key, '▶ Cloning repository (once)...', deploy.id);
-      await execAsync(`git clone --depth 1 --branch ${project.branch} ${project.repository} ${releaseDir}`);
-      const { stdout: commitHash } = await execAsync(`cd ${releaseDir} && git rev-parse --short HEAD`);
-      const { stdout: commitMessage } = await execAsync(`cd ${releaseDir} && git log -1 --pretty=%s`);
+      await run('git', gitCloneArgs(project.branch, project.repository, releaseDir));
+      const { stdout: commitHash } = await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: releaseDir });
+      const { stdout: commitMessage } = await run('git', ['log', '-1', '--pretty=%s'], { cwd: releaseDir });
       await this.prisma.deploy.update({ where: { id: deploy.id }, data: { commitHash: commitHash.trim(), commitMessage: commitMessage.trim() } });
       this.log(key, `✓ Cloned @ ${commitHash.trim()}`, deploy.id);
 
@@ -680,14 +711,14 @@ export class DeployService {
       // Env: project (root) + per-service (app dir) — the latter makes the single shared build bake each NEXT_PUBLIC_* right.
       const projectEnv = this.parseEnvVars(project.envVars || undefined);
       if (project.envVars) {
-        await fs.promises.writeFile(path.join(releaseDir, '.env'), project.envVars);
+        await this.writeEnvFile(path.join(releaseDir, '.env'), project.envVars);
         this.log(key, '✓ Project .env written to repo root', deploy.id);
       }
       for (const svc of services) {
         if (svc.envVars && svc.appDir) {
           const dir = path.join(releaseDir, svc.appDir);
           await fs.promises.mkdir(dir, { recursive: true });
-          await fs.promises.writeFile(path.join(dir, '.env'), svc.envVars);
+          await this.writeEnvFile(path.join(dir, '.env'), svc.envVars);
           this.log(key, `✓ [${svc.name}] .env → ${svc.appDir}/`, deploy.id);
         }
       }
@@ -754,7 +785,8 @@ export class DeployService {
       this.log(key, '✓ Build completed', deploy.id);
 
       // Shared symlink
-      await execAsync(`rm -f ${currentLink} && ln -s ${releaseDir} ${currentLink}`);
+      await run('rm', ['-f', currentLink]);
+      await run('ln', ['-s', releaseDir, currentLink]);
       this.log(key, `✓ ${currentLink} → ${releaseDir}`, deploy.id);
 
       // Start each service (partial failure allowed)
@@ -811,7 +843,7 @@ export class DeployService {
     if (!fs.existsSync(svcDir)) {
       let commit = 'desconhecido';
       try {
-        const { stdout } = await execAsync(`cd ${releaseDir} && git rev-parse --short HEAD`);
+        const { stdout } = await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: releaseDir });
         commit = stdout.trim();
       } catch {
         /* release sem git */
@@ -865,11 +897,11 @@ export class DeployService {
       // Env: project (repo root) + this service (its app dir).
       const projectEnv = this.parseEnvVars(project.envVars || undefined);
       if (project.envVars) {
-        await fs.promises.writeFile(path.join(releaseDir, '.env'), project.envVars);
+        await this.writeEnvFile(path.join(releaseDir, '.env'), project.envVars);
         this.log(key, '✓ Project .env written to repo root', deploy.id);
       }
       if (svc.envVars && svc.appDir) {
-        await fs.promises.writeFile(path.join(svcDir, '.env'), svc.envVars);
+        await this.writeEnvFile(path.join(svcDir, '.env'), svc.envVars);
         this.log(key, `✓ [${svc.name}] .env → ${svc.appDir}/`, deploy.id);
       }
 
@@ -1147,7 +1179,7 @@ export class DeployService {
     if (kind === 'docker') {
       // A service can move between runtimes across deploys; tear the old supervisor
       // down first so the two never fight over the port.
-      await execAsync(`pm2 delete ${svc.name}`).catch(() => undefined);
+      await runQuiet('pm2', ['delete', svc.name]);
       await this.runDockerRelease({
         app: svc,
         key: projectName,
@@ -1168,23 +1200,18 @@ export class DeployService {
       const cfgPath = path.join(APPS_DIR, projectName, `${svc.name}.ecosystem.config.js`);
       await fs.promises.writeFile(cfgPath, cfg);
       try {
-        await execAsync(`pm2 delete ${svc.name}`);
+        await run('pm2', ['delete', svc.name]);
       } catch {
         /* not running */
       }
-      await execAsync(`pm2 start ${cfgPath}`);
-      await execAsync('pm2 save');
+      await run('pm2', ['start', cfgPath]);
+      await run('pm2', ['save']);
       this.log(projectName, `✓ [${svc.name}] PM2 on port ${svc.port}`);
     } else {
       await this.stopDockerApp(svc).catch(() => undefined);
-      const wwwDir = `/var/www/${svc.name}`;
-      await execAsync(`sudo mkdir -p ${wwwDir}`);
-      await execAsync(`sudo rm -rf ${wwwDir}/*`);
-      const distDir = svc.appDir ? `${currentLink}/${svc.appDir}/dist` : `${currentLink}/dist`;
-      await execAsync(`sudo cp -r ${distDir}/* ${wwwDir}/`);
-      await execAsync(`sudo chown -R www-data:www-data ${wwwDir}`);
-      await execAsync(`sudo chmod -R 755 ${wwwDir}`);
-      this.log(projectName, `✓ [${svc.name}] static → ${wwwDir}`);
+      const distDir = svc.appDir ? path.join(currentLink, svc.appDir, 'dist') : path.join(currentLink, 'dist');
+      await this.publishStatic(svc.name, distDir);
+      this.log(projectName, `✓ [${svc.name}] static → ${path.join(WWW_DIR, svc.name)}`);
     }
 
     // Record what ended up supervising the service, so status/logs/metrics query the
@@ -1194,8 +1221,10 @@ export class DeployService {
     await this.updateNginxConfig(svc, kind);
     if (generateSSL && svc.domain) {
       try {
-        await execAsync('which certbot');
-        await this.runCommand(`sudo certbot --nginx -d ${svc.domain} --non-interactive --agree-tos --email admin@${svc.domain}`, '/tmp', projectName);
+        if (!isSafeDomain(svc.domain)) throw new Error(`domínio inválido: ${svc.domain}`);
+        await run('which', ['certbot']);
+        const email = process.env.CERTBOT_EMAIL || `admin@${svc.domain}`;
+        await sudo('certbot', certbotArgs(svc.domain, email), { cwd: '/tmp' });
       } catch (e) {
         this.log(projectName, `  ⚠️ [${svc.name}] SSL skipped: ${e.message}`);
       }
@@ -1209,7 +1238,9 @@ export class DeployService {
     if (!deploy || deploy.projectId !== projectId) throw new BadRequestException('Deploy não encontrado');
 
     const currentLink = path.join(APPS_DIR, project.name, 'current');
-    await execAsync(`rm -f ${currentLink} && ln -s ${deploy.path} ${currentLink}`);
+    const rollbackPath = assertInside(deploy.path, [APPS_DIR], 'caminho da release');
+    await run('rm', ['-f', currentLink]);
+    await run('ln', ['-s', rollbackPath, currentLink]);
     const projectEnv = this.parseEnvVars(project.envVars || undefined);
     for (const svc of project.apps) {
       if (svc.activeRuntime === 'docker') {
@@ -1228,11 +1259,10 @@ export class DeployService {
           assets: detectDockerAssets(svcDir, deploy.path),
         }).catch((e) => this.log(project.name, `❌ [${svc.name}] rollback falhou: ${e.message}`));
       } else if (svc.type === 'vitejs') {
-        const wwwDir = `/var/www/${svc.name}`;
-        const distDir = svc.appDir ? `${deploy.path}/${svc.appDir}/dist` : `${deploy.path}/dist`;
-        await execAsync(`sudo rm -rf ${wwwDir}/* && sudo cp -r ${distDir}/* ${wwwDir}/`).catch(() => undefined);
+        const distDir = svc.appDir ? path.join(deploy.path, svc.appDir, 'dist') : path.join(deploy.path, 'dist');
+        await this.publishStatic(svc.name, distDir).catch(() => undefined);
       } else {
-        await execAsync(`pm2 restart ${svc.name}`).catch(() => undefined);
+        await runQuiet('pm2', ['restart', svc.name]);
       }
     }
     await this.prisma.deploy.updateMany({ where: { projectId }, data: { isCurrent: false } });
@@ -1403,25 +1433,50 @@ ${envString}
       ? staticVhostConfig({ domain: app.domain, appName: app.name, hasCert })
       : proxyVhostConfig({ domain: app.domain, port: app.port, hasCert });
 
-    const configPath = `/etc/nginx/sites-available/${app.name}.conf`;
-    const enabledPath = `/etc/nginx/sites-enabled/${app.name}.conf`;
+    // O nome vira o nome do arquivo de vhost. Validar antes evita que uma linha antiga
+    // do banco escreva fora de sites-available.
+    const safeName = assertSafeName(app.name, 'nome do app');
+    const configPath = path.join(NGINX_AVAILABLE, `${safeName}.conf`);
+    const enabledPath = path.join(NGINX_ENABLED, `${safeName}.conf`);
 
     // Write config to sites-available first
-    const tempPath = `/tmp/${app.name}.nginx.conf`;
+    const tempPath = path.join('/tmp', `${safeName}.nginx.conf`);
     await fs.promises.writeFile(tempPath, config);
     this.log(app.name, `  Writing config to ${configPath}${hasCert ? ' (with HTTPS)' : ''}`);
 
     // Move to sites-available with sudo
-    await execAsync(`sudo mv ${tempPath} ${configPath}`);
+    await sudo('mv', [tempPath, configPath]);
 
     // Create symlink in sites-enabled
-    await execAsync(`sudo rm -f ${enabledPath}`);
-    await execAsync(`sudo ln -s ${configPath} ${enabledPath}`);
+    await sudo('rm', ['-f', enabledPath]);
+    await sudo('ln', ['-s', configPath, enabledPath]);
     this.log(app.name, `  Symlink created: ${enabledPath}`);
 
     // Test and reload nginx
-    await execAsync('sudo nginx -t');
+    await sudo('nginx', ['-t']);
     this.log(app.name, '  Nginx config test passed');
-    await execAsync('sudo systemctl reload nginx');
+    await sudo('systemctl', ['reload', 'nginx']);
+  }
+
+  /**
+   * Publica o build estático de uma release em /var/www/<app>.
+   *
+   * Antes eram cinco `execAsync` com glob de shell (`rm -rf ${wwwDir}/*` e
+   * `cp -r ${distDir}/* ${wwwDir}/`). Glob só existe dentro de um shell, então a
+   * conversão troca a estratégia: remove o diretório inteiro e recria, e copia com
+   * `<dist>/.`, que o cp entende como "o conteúdo", sem precisar de expansão.
+   *
+   * O assertInside garante que o destino está mesmo debaixo de /var/www antes de um
+   * `rm -rf` com sudo.
+   */
+  private async publishStatic(appName: string, distDir: string): Promise<void> {
+    const safeName = assertSafeName(appName, 'nome do app');
+    const wwwDir = assertInside(path.join(WWW_DIR, safeName), [WWW_DIR], 'diretório estático');
+
+    await sudo('rm', ['-rf', wwwDir]);
+    await sudo('mkdir', ['-p', wwwDir]);
+    await sudo('cp', ['-r', path.join(distDir, '.'), wwwDir]);
+    await sudo('chown', ['-R', 'www-data:www-data', wwwDir]);
+    await sudo('chmod', ['-R', '755', wwwDir]);
   }
 }

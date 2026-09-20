@@ -1,10 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import * as os from 'os';
-
-const execAsync = promisify(exec);
+import { run } from '../common/run';
+import { parseCpuUsage, parseDiskUsage } from './system-parse';
 
 interface UpdateEmailSettingsDto {
   emailEnabled: boolean;
@@ -87,18 +85,24 @@ export class SystemService {
   }
 
   private async getCpuUsage(): Promise<number> {
+    // Era `top -bn1 | grep 'Cpu(s)' | awk '{print $2}'`. Sem o pipeline de shell, e
+    // lendo o idle em vez da coluna 2 — que muda de posição conforme o locale e a
+    // versão do procps, e por isso às vezes devolvia o número errado.
     try {
-      const { stdout } = await execAsync("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'");
-      return Math.round(parseFloat(stdout.trim()) || 0);
+      const { stdout } = await run('top', ['-bn1'], { timeout: 10_000 });
+      const usage = parseCpuUsage(stdout);
+      if (usage !== null) return usage;
     } catch {
-      // Fallback: calculate from os module
-      const cpus = os.cpus();
-      const totalIdle = cpus.reduce((acc, cpu) => acc + cpu.times.idle, 0);
-      const totalTick = cpus.reduce((acc, cpu) => 
-        acc + cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle + cpu.times.irq, 0
-      );
-      return Math.round(100 - (totalIdle / totalTick * 100));
+      /* cai no fallback do módulo os */
     }
+
+    const cpus = os.cpus();
+    const totalIdle = cpus.reduce((acc, cpu) => acc + cpu.times.idle, 0);
+    const totalTick = cpus.reduce((acc, cpu) =>
+      acc + cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle + cpu.times.irq, 0
+    );
+    if (!totalTick) return 0;
+    return Math.round(100 - (totalIdle / totalTick * 100));
   }
 
   private getMemoryUsage(): number {
@@ -108,9 +112,12 @@ export class SystemService {
   }
 
   private async getDiskUsage(): Promise<number> {
+    // Era `df -h / | tail -1 | awk '{print $5}'`. O `-P` garante uma linha por
+    // sistema de arquivos mesmo com nome de device longo; sem ele o df quebra a
+    // linha e a coluna 5 some.
     try {
-      const { stdout } = await execAsync("df -h / | tail -1 | awk '{print $5}'");
-      return parseInt(stdout.trim().replace('%', '')) || 0;
+      const { stdout } = await run('df', ['-P', '/'], { timeout: 10_000 });
+      return parseDiskUsage(stdout) ?? 0;
     } catch {
       return 0;
     }

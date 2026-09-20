@@ -220,3 +220,59 @@ test('normalizePort converte só string de dígitos', () => {
   assert.equal(normalizePort(3000), 3000);
   assert.equal(normalizePort('abc'), 'abc');
 });
+
+// --- Fase 2: validação do que alimenta comandos do sistema --------------------
+
+test('CreateAppDto rejeita repositório que o git leria como flag', async () => {
+  const message = await expectRejection(CreateAppDto, {
+    name: 'meu-app',
+    type: 'nestjs',
+    port: 3000,
+    repository: '--upload-pack=touch /tmp/pwned',
+  });
+  assert.match(message, /repository/);
+});
+
+test('CreateAppDto rejeita repositório com metacaractere de shell', async () => {
+  for (const repository of [
+    'git@github.com:x/y.git; id',
+    'git@github.com:x/$(id).git',
+    'file:///root/apps',
+    '/root/apps/algum-app',
+  ]) {
+    const message = await expectRejection(CreateAppDto, {
+      name: 'meu-app',
+      type: 'nestjs',
+      port: 3000,
+      repository,
+    });
+    assert.match(message, /repository/, repository);
+  }
+});
+
+test('CreateAppDto rejeita nome que viraria caminho ou comando', async () => {
+  for (const name of ['../etc', 'Meu-App', 'app;rm -rf /', '-app', 'meu app']) {
+    const message = await expectRejection(CreateAppDto, {
+      name,
+      type: 'nestjs',
+      port: 3000,
+      repository: 'git@github.com:x/y.git',
+    });
+    assert.match(message, /name/, name);
+  }
+});
+
+test('CreateAppDto aceita as formas legítimas de repositório', async () => {
+  for (const repository of [
+    'git@github.com:estopassoli/deploy-hub.git',
+    'https://github.com/estopassoli/deploy-hub.git',
+  ]) {
+    const result = await run(CreateAppDto, {
+      name: 'meu-app',
+      type: 'nestjs',
+      port: 3000,
+      repository,
+    });
+    assert.equal(result.repository, repository);
+  }
+});

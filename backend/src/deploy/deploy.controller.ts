@@ -1,14 +1,24 @@
 import { Controller, Post, Body, Param, UseGuards, Get } from '@nestjs/common';
-import { IsString, IsNumber, IsOptional, IsIn, IsBoolean } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsIn, IsBoolean, Matches, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { DeployService } from './deploy.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { BRANCH_PATTERN, NAME_MAX_LENGTH, NAME_PATTERN } from '../common/validation';
+import { IsSafeDomain, IsSafeRepositoryUrl } from '../common/validation-decorators';
 
 class DeployDto {
-  @IsString()
+  // Vai direto para `git clone`. Além do execFile sem shell, o formato é restrito
+  // porque um valor começando com '-' seria lido pelo próprio git como flag —
+  // `--upload-pack=<cmd>` executa um comando arbitrário.
+  @IsSafeRepositoryUrl()
   repository: string;
 
+  // O nome vira diretório em APPS_DIR, processo PM2, container e vhost do nginx.
   @IsString()
+  @MaxLength(NAME_MAX_LENGTH)
+  @Matches(NAME_PATTERN, {
+    message: 'name deve conter apenas letras minúsculas, números e hífens, começando por letra ou número',
+  })
   name: string;
 
   @IsNumber()
@@ -16,7 +26,7 @@ class DeployDto {
   port: number;
 
   @IsOptional()
-  @IsString()
+  @IsSafeDomain()
   domain?: string;
 
   @IsString()
@@ -25,6 +35,7 @@ class DeployDto {
 
   @IsOptional()
   @IsString()
+  @Matches(BRANCH_PATTERN, { message: 'branch contém caracteres inválidos' })
   branch?: string;
 
   @IsOptional()

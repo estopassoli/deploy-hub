@@ -34,6 +34,12 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  BRANCH_PATTERN as SHARED_BRANCH_PATTERN,
+  NAME_MAX_LENGTH,
+  NAME_PATTERN,
+} from '../common/validation.ts';
+import { IsSafeRepositoryUrl } from '../common/validation-decorators.ts';
 
 /** Tipos de app aceitos hoje. A Fase 6 troca isto por um registro de presets. */
 export const APP_TYPES = ['nestjs', 'nextjs', 'vitejs'] as const;
@@ -41,8 +47,8 @@ export const APP_TYPES = ['nestjs', 'nextjs', 'vitejs'] as const;
 /** Preferência de runtime pedida pelo usuário (`activeRuntime` é escrito pelo deploy). */
 export const APP_RUNTIMES = ['auto', 'pm2', 'docker'] as const;
 
-/** Mesmo padrão de branch já usado por `UpdateProjectDto` em projects.controller.ts. */
-export const BRANCH_PATTERN = /^[\w.\-/]+$/;
+/** Reexportado de common/validation para os DTOs e o teste usarem a mesma fonte. */
+export const BRANCH_PATTERN = SHARED_BRANCH_PATTERN;
 
 /** Maior comprimento possível de um FQDN. */
 export const DOMAIN_MAX_LENGTH = 253;
@@ -162,8 +168,17 @@ apply(
   Max(CONTAINER_PORT_MAX) as PropDecorator,
 );
 
-apply(CreateAppDto, 'name', IsString() as PropDecorator, MaxLength(100) as PropDecorator);
-apply(CreateAppDto, 'repository', IsString() as PropDecorator, MaxLength(2048) as PropDecorator);
+apply(
+  CreateAppDto,
+  'name',
+  IsString() as PropDecorator,
+  MaxLength(NAME_MAX_LENGTH) as PropDecorator,
+  // O nome vira diretório em APPS_DIR, processo PM2, container e vhost do nginx.
+  Matches(NAME_PATTERN, {
+    message: 'name deve conter apenas letras minúsculas, números e hífens, começando por letra ou número',
+  }) as PropDecorator,
+);
+apply(CreateAppDto, 'repository', IsSafeRepositoryUrl() as PropDecorator);
 apply(
   CreateAppDto,
   'type',
