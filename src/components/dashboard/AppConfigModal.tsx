@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Settings, Save, Loader2, RotateCcw } from 'lucide-react';
+import { Settings, Save, Loader2, RotateCcw, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -35,6 +35,7 @@ interface ConfigForm {
   runtime: string;
   containerPort: string;
   dockerContext: string;
+  healthPath: string;
 }
 
 const defaultForm: ConfigForm = {
@@ -48,6 +49,7 @@ const defaultForm: ConfigForm = {
   runtime: 'auto',
   containerPort: '',
   dockerContext: '',
+  healthPath: '',
 };
 
 export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: AppConfigModalProps) {
@@ -71,6 +73,7 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
       runtime: form.runtime !== originalForm.runtime,
       containerPort: form.containerPort !== originalForm.containerPort,
       dockerContext: form.dockerContext !== originalForm.dockerContext,
+      healthPath: form.healthPath !== originalForm.healthPath,
     };
     return modified;
   }, [form, originalForm]);
@@ -103,6 +106,7 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
         runtime: app.runtime ?? 'auto',
         containerPort: app.containerPort != null ? String(app.containerPort) : '',
         dockerContext: app.dockerContext ?? '',
+        healthPath: app.healthPath ?? '',
       };
 
       setActiveRuntime(app.activeRuntime ?? null);
@@ -130,6 +134,7 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
       runtime: form.runtime,
       containerPort: form.containerPort,
       dockerContext: form.dockerContext,
+      healthPath: form.healthPath,
     };
 
     console.log('[AppConfigModal] Saving config:', {
@@ -155,6 +160,42 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
       toast.error(error.message || 'Erro ao salvar configurações');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const [isApplying, setIsApplying] = useState(false);
+
+  /**
+   * Salva e aplica as variáveis na release atual, sem clone/install/build.
+   *
+   * Trocar uma senha de banco leva segundos em vez dos minutos de um deploy inteiro.
+   * As chaves NEXT_PUBLIC_ e VITE_ são embutidas no bundle durante o build, então o
+   * backend devolve quais delas exigem redeploy e o aviso aparece aqui.
+   */
+  const handleSaveAndRestart = async () => {
+    setIsApplying(true);
+    try {
+      if (hasChanges) {
+        await api.updateApp(appId, { ...form });
+        setOriginalForm(form);
+      }
+
+      const result = await api.applyEnv(appId);
+
+      if (result.diff.buildRequired.length > 0) {
+        toast.warning(result.message, { duration: 10000 });
+      } else if (result.diff.isEmpty) {
+        toast.info(`Nenhuma variável mudou — ${appName} reiniciado mesmo assim.`);
+      } else {
+        toast.success(result.message);
+      }
+
+      onOpenChange(false);
+      onSaved?.();
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao aplicar variáveis');
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -366,6 +407,27 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
                 que é executado num container descartável a partir da imagem recém-construída.
               </p>
 
+              <div className="space-y-2">
+                <Label htmlFor="cfgHealthPath" className="text-sm font-medium flex items-center gap-2">
+                  Health check
+                  {modifiedFields.healthPath && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">modificado</span>
+                  )}
+                </Label>
+                <Input
+                  id="cfgHealthPath"
+                  placeholder="/"
+                  className={getFieldClassName('healthPath')}
+                  value={form.healthPath}
+                  onChange={(e) => updateField('healthPath', e.target.value)}
+                />
+                <p className="text-[10px] sm:text-xs text-muted-foreground">
+                  Caminho checado em 127.0.0.1 depois que o app sobe (10 tentativas a cada 3s).
+                  Qualquer resposta abaixo de 500 conta como saudável. Se não responder, o deploy
+                  falha e volta sozinho para a release anterior. Vazio = <span className="font-mono">/</span>.
+                </p>
+              </div>
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="cfgContainerPort" className="text-sm flex items-center gap-2">
@@ -424,9 +486,28 @@ export function AppConfigModal({ appId, appName, open, onOpenChange, onSaved }: 
             >
               Cancelar
             </Button>
+            <Button
+              variant="outline"
+              onClick={handleSaveAndRestart}
+              disabled={isLoading || isSaving || isApplying}
+              className="flex-1 sm:flex-none"
+              title="Reescreve o .env da release atual e reinicia o app, sem refazer o build"
+            >
+              {isApplying ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Aplicando...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Salvar e reiniciar
+                </>
+              )}
+            </Button>
             <Button 
               onClick={handleSave} 
-              disabled={isLoading || isSaving || !hasChanges}
+              disabled={isLoading || isSaving || isApplying || !hasChanges}
               className="flex-1 sm:flex-none"
             >
               {isSaving ? (

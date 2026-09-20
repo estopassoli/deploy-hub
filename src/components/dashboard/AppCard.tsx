@@ -15,6 +15,7 @@ import {
   RefreshCw,
   AlertTriangle,
   Settings,
+  Ban,
   Loader2,
   TrendingUp,
   RefreshCcw
@@ -149,6 +150,27 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
       setDeployComplete(true);
       setDeploySuccess(false);
       setIsRedeploying(false);
+    }
+  };
+
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  /**
+   * Interrompe o deploy em andamento.
+   *
+   * Para um service de projeto monorepo, a chave do deploy é o nome do PROJETO: o
+   * release é compartilhado e é nele que a trava é tomada.
+   */
+  const handleCancelDeploy = async () => {
+    setIsCancelling(true);
+    try {
+      const key = (app as any).project?.name || app.name;
+      await api.cancelDeploy(key);
+      toast.info('Cancelamento solicitado — encerrando a etapa atual...');
+    } catch (error: any) {
+      toast.error(error.message || 'Não foi possível cancelar');
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -375,10 +397,10 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
               <RefreshCw className={cn("h-5 w-5 flex-shrink-0", isRedeploying && "animate-spin text-primary")} />
-              <span className="truncate">Redeploying {app.name}</span>
+              <span className="truncate">Redeploy de {app.name}</span>
             </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              Pulling latest changes from {app.branch} and rebuilding
+              Trazendo a última versão de {app.branch} e reconstruindo
             </DialogDescription>
           </DialogHeader>
           
@@ -405,13 +427,25 @@ export function AppCard({ app, onRefresh, lastUpdated }: AppCardProps) {
           <DialogFooter className="pt-4">
             {deployComplete ? (
               <Button onClick={handleCloseRedeployModal} variant={deploySuccess ? 'default' : 'outline'} className="w-full sm:w-auto">
-                {deploySuccess ? 'Done' : 'Close'}
+                {deploySuccess ? 'Concluído' : 'Fechar'}
               </Button>
             ) : (
-              <Button disabled variant="outline" className="w-full sm:w-auto">
-                <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                Deploying...
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  className="w-full sm:w-auto text-destructive hover:text-destructive"
+                  disabled={isCancelling}
+                  onClick={handleCancelDeploy}
+                  title="Encerra a etapa atual sem trocar o symlink — o app segue na release anterior"
+                >
+                  {isCancelling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Ban className="h-4 w-4 mr-2" />}
+                  Cancelar deploy
+                </Button>
+                <Button disabled variant="outline" className="w-full sm:w-auto">
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                  Deployando...
+                </Button>
+              </>
             )}
           </DialogFooter>
         </DialogContent>

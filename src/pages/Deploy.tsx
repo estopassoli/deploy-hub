@@ -21,6 +21,7 @@ import {
     Rocket,
     Server,
     ShieldCheck,
+    Ban,
     XCircle
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -87,8 +88,21 @@ export default function Deploy() {
   const [deployLogs, setDeployLogs] = useState<LogLine[]>([]);
   const [deployResult, setDeployResult] = useState<DeployResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const deployCompletionRef = useRef(false);
+
+  const handleCancel = async () => {
+    setCancelling(true);
+    try {
+      await api.cancelDeploy(formData.name);
+      toast.info('Cancelamento solicitado — encerrando a etapa atual...');
+    } catch (error: any) {
+      toast.error(error.message || 'Não foi possível cancelar');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   // Auto-scroll logs
   useEffect(() => {
@@ -622,8 +636,21 @@ export default function Deploy() {
                   <XCircle className="h-4 w-4 text-destructive" />
                 )}
                 <span className="font-medium">
-                  {step === 'deploying' ? `Deploying ${formData.name}...` : `Deploy failed: ${formData.name}`}
+                  {step === 'deploying' ? `Fazendo deploy de ${formData.name}...` : `Deploy falhou: ${formData.name}`}
                 </span>
+                {step === 'deploying' && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto text-destructive hover:text-destructive"
+                    disabled={cancelling}
+                    onClick={handleCancel}
+                    title="Encerra a etapa atual e interrompe o deploy sem trocar o symlink"
+                  >
+                    {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                    Cancelar
+                  </Button>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="text-muted-foreground">Repository:</div>

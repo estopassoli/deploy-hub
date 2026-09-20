@@ -86,7 +86,7 @@ class ApiClient {
     });
   }
 
-  async updateApp(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; runtime?: string; containerPort?: number | string | null; dockerContext?: string }) {
+  async updateApp(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; runtime?: string; containerPort?: number | string | null; dockerContext?: string; healthPath?: string }) {
     return this.request<any>(`/apps/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -177,6 +177,31 @@ class ApiClient {
 
   async getDeployHistory() {
     return this.request<any[]>('/deploy/history');
+  }
+
+  /** Deploys em andamento agora, por chave (nome do app ou do projeto). */
+  async getRunningDeploys() {
+    return this.request<Array<{ key: string; startedAt: string; deployId?: string; source?: string }>>('/deploy/running');
+  }
+
+  /** Cancela o deploy em andamento; `key` é o nome do app ou do projeto. */
+  async cancelDeploy(key: string) {
+    return this.request<{ success: boolean; message: string }>(`/deploy/cancel/${encodeURIComponent(key)}`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Reescreve o .env da release atual e reinicia, sem rebuild.
+   * `diff.buildRequired` traz as chaves NEXT_PUBLIC_/VITE_ que só valem após redeploy.
+   */
+  async applyEnv(appId: string) {
+    return this.request<{
+      success: boolean;
+      restarted: boolean;
+      message: string;
+      diff: { added: string[]; removed: string[]; changed: string[]; buildRequired: string[]; isEmpty: boolean };
+    }>(`/apps/${appId}/apply-env`, { method: 'POST' });
   }
 
   async getDeployLogs(deployId: string) {

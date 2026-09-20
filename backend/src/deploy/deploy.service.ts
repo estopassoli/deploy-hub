@@ -1,6 +1,6 @@
 
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { spawn } from 'child_process';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, OnModuleInit, forwardRef } from '@nestjs/common';
+import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { assertInside, assertSafeName } from '../common/paths';
@@ -24,6 +24,12 @@ import {
 } from './package-manager';
 import type { PmInfo } from './package-manager';
 import { proxyVhostConfig, staticVhostConfig } from './nginx-config';
+import { DeployLock, lockedMessage } from './deploy-lock';
+import { PhaseTracker } from './phase-tracker';
+import { normalizeHealthPath, waitForHealthy } from './health-check';
+import { classifyMigrationOutcome, describeMigrationOutcome } from './migration-outcome';
+import { describeEnvDiff, diffEnv } from './env-diff';
+import { decidePm2Strategy } from './pm2-strategy';
 import {
   detectDockerAssets,
   resolveRuntime,
@@ -66,11 +72,21 @@ function certbotArgs(domain: string, email: string): string[] {
   return ['--nginx', '-d', domain, '--non-interactive', '--agree-tos', '--email', email];
 }
 
+/** Erro interno que sinaliza "o operador cancelou", para não virar log de falha. */
+class DeployCancelledError extends Error {
+  constructor() {
+    super('Deploy cancelado');
+    this.name = 'DeployCancelledError';
+  }
+}
+
 @Injectable()
-export class DeployService {
+export class DeployService implements OnModuleInit {
+  private readonly logger = new Logger('DeployService');
+
   constructor(
     private prisma: PrismaService,
-    private appsService: AppsService,
+    @Inject(forwardRef(() => AppsService)) private appsService: AppsService,
     private deployGateway: DeployGateway,
     private emailService: EmailService,
   ) { }
@@ -78,6 +94,122 @@ export class DeployService {
   // Store logs per deploy for persistence
   private deployLogs: Map<string, string[]> = new Map();
   private currentPhase: Map<string, string> = new Map();
+
+  /** Um deploy por app/projeto. Ver deploy-lock.ts para o porquê. */
+  private readonly lock = new DeployLock();
+
+  /** Cronômetro por chave de deploy (nome do app ou do projeto). */
+  private readonly trackers: Map<string, PhaseTracker> = new Map();
+
+  /** Processos filhos vivos por chave, para o cancelamento conseguir matá-los. */
+  private readonly runningProcs: Map<string, Set<ChildProcess>> = new Map();
+
+  /** Chaves que o operador pediu para cancelar. */
+  private readonly cancelRequested: Set<string> = new Set();
+
+  /**
+   * Fecha os deploys que ficaram pendurados.
+   *
+   * O estado do deploy vive em memória: se o backend reinicia no meio de um (deploy do
+   * próprio painel, crash, OOM), a linha fica em `building` para sempre — o histórico
+   * mostra um deploy eterno e o app parece estar deployando quando não está.
+   */
+  async onModuleInit(): Promise<void> {
+    const { count } = await this.prisma.deploy.updateMany({
+      where: { status: { in: ['building', 'pending'] } },
+      data: { status: 'failed', finishedAt: new Date() },
+    });
+
+    if (count > 0) {
+      this.logger.warn(
+        `${count} deploy(s) estavam em andamento quando o backend parou e foram marcados como falhos.`,
+      );
+      await this.prisma.app.updateMany({
+        where: { status: 'deploying' },
+        data: { status: 'error' },
+      });
+      await this.prisma.project.updateMany({
+        where: { status: 'deploying' },
+        data: { status: 'error' },
+      });
+    }
+  }
+
+  // --- trava, cancelamento e cronômetro ---------------------------------------
+
+  /** Trava a chave ou lança 409 com quem está segurando. */
+  private acquireLock(key: string, source: string): void {
+    const acquired = this.lock.acquire(key, { source });
+    if (!acquired) {
+      throw new ConflictException(lockedMessage(this.lock.info(key)!));
+    }
+    this.cancelRequested.delete(key);
+    this.trackers.set(key, new PhaseTracker());
+    this.runningProcs.set(key, new Set());
+  }
+
+  private releaseLock(key: string): void {
+    this.lock.release(key);
+    this.trackers.delete(key);
+    this.runningProcs.delete(key);
+    this.cancelRequested.delete(key);
+  }
+
+  private isCancelled(key: string): boolean {
+    return this.cancelRequested.has(key);
+  }
+
+  /** Lança se o operador pediu cancelamento — chamado entre as etapas do pipeline. */
+  private throwIfCancelled(key: string): void {
+    if (this.isCancelled(key)) throw new DeployCancelledError();
+  }
+
+  /**
+   * Cancela o deploy em andamento de uma chave.
+   *
+   * Mata o processo filho da etapa atual (install, build, docker build) com SIGTERM e,
+   * se resistir, SIGKILL. O pipeline percebe pelo `throwIfCancelled` entre as etapas e
+   * sai sem trocar o symlink — a release em construção fica no disco, incompleta, e a
+   * limpeza diária a remove.
+   */
+  async cancel(key: string): Promise<{ success: boolean; message: string }> {
+    if (!this.lock.isLocked(key)) {
+      throw new BadRequestException(`Nenhum deploy de "${key}" em andamento`);
+    }
+
+    this.cancelRequested.add(key);
+    this.log(key, '', undefined);
+    this.log(key, '⛔ Cancelamento solicitado — encerrando a etapa atual...');
+
+    const procs = this.runningProcs.get(key);
+    if (procs) {
+      for (const proc of procs) {
+        try {
+          proc.kill('SIGTERM');
+          const pid = proc.pid;
+          setTimeout(() => {
+            try {
+              if (pid && !proc.killed) proc.kill('SIGKILL');
+            } catch {
+              /* já morreu */
+            }
+          }, 5000);
+        } catch {
+          /* já morreu */
+        }
+      }
+    }
+
+    return { success: true, message: `Cancelamento de "${key}" solicitado` };
+  }
+
+  /** Deploys em andamento agora — alimenta o botão de cancelar na UI. */
+  runningDeploys(): Array<{ key: string; startedAt: Date; deployId?: string; source?: string }> {
+    return this.lock.keys().map((key) => {
+      const info = this.lock.info(key)!;
+      return { key, startedAt: info.startedAt, deployId: info.deployId, source: info.source };
+    });
+  }
 
   private log(appName: string, message: string, deployId?: string) {
     console.log(`[${appName}] ${message}`);
@@ -95,6 +227,322 @@ export class DeployService {
 
   private setPhase(appName: string, phase: string) {
     this.currentPhase.set(appName, phase);
+    this.trackers.get(appName)?.start(phase);
+  }
+
+  /**
+   * Roda um comando de migration e classifica o resultado.
+   *
+   * Antes isto era `try { ... } catch { log('No migrations to apply or error') }` — as
+   * duas coisas tratadas igual, e o deploy seguindo em frente nos dois casos. Uma
+   * migration que falha por conflito ou por banco fora do ar deixava o symlink ser
+   * trocado e o app subir contra um schema que não bate com o código.
+   *
+   * Lança quando a migration falhou de verdade, abortando o deploy antes do symlink.
+   */
+  private async runMigration(
+    command: string,
+    cwd: string,
+    key: string,
+    label: string,
+    deployId?: string,
+    env?: Record<string, string>,
+  ): Promise<void> {
+    const result = await this.runCommandResult(command, cwd, key, deployId, env);
+    const outcome = classifyMigrationOutcome(result.code, result.combined);
+
+    if (outcome === 'failed') {
+      const detalhe = (result.stderr || result.stdout || '').trim().split('\n').slice(-5).join('\n');
+      this.log(key, `❌ ${label} migration falhou (exit ${result.code})`, deployId);
+      throw new Error(`Migration falhou${label ? ` em ${label}` : ''}: ${detalhe || `exit ${result.code}`}`);
+    }
+
+    this.log(key, `${describeMigrationOutcome(outcome)}${label ? ` (${label})` : ''}`, deployId);
+  }
+
+  /**
+   * Checa se o app respondeu depois de subir e, se não, volta para a release anterior.
+   *
+   * O deploy considerava sucesso assim que o `pm2 start` retornava — mas o PM2 retorna
+   * quando *iniciou* o processo, não quando ele está atendendo. Um app que morre no
+   * boot (env faltando, porta ocupada, migration não aplicada) entrava em loop de
+   * restart enquanto o painel exibia "Deploy completed successfully" e o domínio
+   * respondia 502.
+   *
+   * Devolve null quando está saudável, ou a mensagem do problema.
+   */
+  private async verifyHealth(
+    app: { id: string; name: string; port: number; healthPath?: string | null },
+    key: string,
+    deployId?: string,
+  ): Promise<string | null> {
+    const path = normalizeHealthPath(app.healthPath);
+    this.log(key, `▶ Health check em http://127.0.0.1:${app.port}${path} ...`, deployId);
+
+    const result = await waitForHealthy({
+      port: app.port,
+      path,
+      isCancelled: () => this.isCancelled(key),
+      onAttempt: (attempt, total, detail) => {
+        if (attempt === total || attempt % 3 === 0) {
+          this.log(key, `  tentativa ${attempt}/${total}: ${detail}`, deployId);
+        }
+      },
+    });
+
+    if (result.ok) {
+      this.log(key, `✓ App respondeu (HTTP ${result.status}) em ${Math.round(result.durationMs / 1000)}s`, deployId);
+      return null;
+    }
+
+    if (result.error === 'cancelado') return 'cancelado';
+    return `não respondeu após ${result.attempts} tentativas (${result.error})`;
+  }
+
+  /**
+   * Volta o symlink para a última release que funcionou e reinicia o processo.
+   *
+   * Chamado quando o health check reprova. Sem isto, um deploy ruim deixa o app fora
+   * do ar até alguém perceber e clicar em rollback manualmente.
+   */
+  private async rollbackToPreviousRelease(
+    app: { id: string; name: string; type: string; activeRuntime?: string | null },
+    key: string,
+    failedDeployId: string,
+    deployId?: string,
+  ): Promise<boolean> {
+    const anterior = await this.prisma.deploy.findFirst({
+      where: { appId: app.id, status: 'success', id: { not: failedDeployId } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!anterior) {
+      this.log(key, '  ⚠ Sem release anterior bem-sucedida para voltar — o app fica como está.', deployId);
+      return false;
+    }
+
+    this.log(key, `▶ Rollback automático para ${anterior.version}...`, deployId);
+    try {
+      const currentLink = path.join(APPS_DIR, app.name, 'current');
+      const alvo = assertInside(anterior.path, [APPS_DIR], 'caminho da release anterior');
+      await run('rm', ['-f', currentLink]);
+      await run('ln', ['-s', alvo, currentLink]);
+
+      if (app.activeRuntime === 'docker') {
+        await this.appsService.rollback(app.id, anterior.id);
+      } else if (app.type !== 'vitejs') {
+        await runQuiet('pm2', ['restart', app.name]);
+      }
+
+      await this.prisma.deploy.updateMany({ where: { appId: app.id }, data: { isCurrent: false } });
+      await this.prisma.deploy.update({ where: { id: anterior.id }, data: { isCurrent: true } });
+      await this.prisma.app.update({
+        where: { id: app.id },
+        data: { currentPath: anterior.path, status: 'running' },
+      });
+
+      this.log(key, `✓ Rollback automático concluído — ${app.name} voltou para ${anterior.version}`, deployId);
+      return true;
+    } catch (e) {
+      this.log(key, `❌ Rollback automático falhou: ${e.message}`, deployId);
+      return false;
+    }
+  }
+
+  /**
+   * Sobe (ou recarrega) um processo no PM2 a partir do ecosystem gerado.
+   *
+   * O caminho antigo era sempre `pm2 delete` + `pm2 start`. Entre os dois não há
+   * processo nenhum na porta: o nginx tenta o proxy, ninguém atende, e quem estiver
+   * usando o app leva 502 durante todo o boot. `startOrReload` evita essa janela
+   * quando a identidade do processo não mudou — ver pm2-strategy.ts.
+   */
+  private async startOrReloadPm2(o: {
+    name: string;
+    configPath: string;
+    nextConfig: string;
+    previousRuntime?: string | null;
+    key: string;
+    deployId?: string;
+  }): Promise<void> {
+    const previousConfig = await fs.promises.readFile(o.configPath, 'utf-8').catch(() => null);
+
+    let processExists = false;
+    try {
+      const { stdout } = await run('pm2', ['jlist']);
+      processExists = JSON.parse(stdout).some((proc: any) => proc.name === o.name);
+    } catch {
+      /* sem pm2 respondendo, recria */
+    }
+
+    const strategy = decidePm2Strategy({
+      processExists,
+      previousConfig,
+      nextConfig: o.nextConfig,
+      previousRuntime: o.previousRuntime,
+    });
+
+    await fs.promises.writeFile(o.configPath, o.nextConfig);
+
+    if (strategy === 'reload') {
+      this.log(o.key, '  Recarregando processo (sem janela de 502)...', o.deployId);
+      await run('pm2', ['startOrReload', o.configPath, '--update-env']);
+    } else {
+      this.log(o.key, '  Recriando processo no PM2...', o.deployId);
+      await runQuiet('pm2', ['delete', o.name]);
+      await run('pm2', ['start', o.configPath]);
+    }
+
+    await run('pm2', ['save']);
+  }
+
+  /**
+   * Reescreve o `.env` da release atual e reinicia, sem rebuild.
+   *
+   * Trocar uma senha de banco não precisa de clone, install e build: o processo lê a
+   * variável em runtime. O que este caminho **não** resolve são as chaves
+   * `NEXT_PUBLIC_*` e `VITE_*`, embutidas no bundle durante o build — elas são
+   * devolvidas em `buildRequired` para a UI oferecer o redeploy completo.
+   */
+  async applyEnv(appId: string): Promise<{
+    success: boolean;
+    restarted: boolean;
+    diff: ReturnType<typeof diffEnv>;
+    message: string;
+  }> {
+    const app = await this.prisma.app.findUnique({
+      where: { id: appId },
+      include: { project: true },
+    });
+    if (!app) throw new BadRequestException('App não encontrado');
+
+    const ownerName = app.project?.name ?? app.name;
+    const currentLink = path.join(APPS_DIR, ownerName, 'current');
+
+    let releaseDir: string;
+    try {
+      releaseDir = await fs.promises.realpath(currentLink);
+    } catch {
+      throw new BadRequestException(
+        'Este app ainda não tem uma release. Faça um deploy antes de aplicar variáveis.',
+      );
+    }
+
+    if (app.activeRuntime === 'static' || (app.type === 'vitejs' && !app.activeRuntime)) {
+      throw new BadRequestException(
+        'App estático não lê variáveis em runtime — as mudanças só valem com um redeploy.',
+      );
+    }
+
+    // Mesma sobreposição do deploy: env do projeto na raiz, env do service no appDir.
+    const projectEnv = app.project?.envVars || '';
+    const serviceEnv = app.envVars || '';
+    const appWorkDir = app.appDir ? path.join(releaseDir, app.appDir) : releaseDir;
+    const alvo = path.join(appWorkDir, '.env');
+
+    const anterior = await fs.promises.readFile(alvo, 'utf-8').catch(() => '');
+    const novo = app.project ? serviceEnv : serviceEnv;
+    const diff = diffEnv(anterior, novo);
+
+    this.log(ownerName, `▶ Aplicando variáveis de ambiente em ${app.name} (${describeEnvDiff(diff)})`);
+
+    if (app.project && projectEnv) {
+      await this.writeEnvFile(path.join(releaseDir, '.env'), projectEnv);
+    }
+    await this.writeEnvFile(alvo, novo);
+
+    let restarted = false;
+    if (app.activeRuntime === 'docker') {
+      // O container recebe o env por --env-file, que é lido no `docker run`: não há
+      // como atualizá-lo sem recriar o container.
+      await this.appsService.restart(app.id);
+      restarted = true;
+      this.log(ownerName, `✓ Container de ${app.name} recriado com as variáveis novas`);
+    } else {
+      await run('pm2', ['restart', app.name, '--update-env']);
+      restarted = true;
+      this.log(ownerName, `✓ ${app.name} reiniciado com as variáveis novas`);
+    }
+
+    const message = diff.buildRequired.length
+      ? `Variáveis aplicadas, mas ${diff.buildRequired.join(', ')} só valem após um redeploy (são embutidas no build).`
+      : `Variáveis aplicadas e ${app.name} reiniciado.`;
+
+    if (diff.buildRequired.length) {
+      this.log(ownerName, `  ⚠️ ${diff.buildRequired.join(', ')} exigem redeploy para ter efeito`);
+    }
+
+    return { success: true, restarted, diff, message };
+  }
+
+  /**
+   * Cria a linha de Deploy do service dentro de uma release de projeto.
+   *
+   * Antes, uma release de projeto gerava **uma** linha com `projectId` preenchido e
+   * `appId` nulo. O card de cada service procurava deploys por `appId` e não achava
+   * nenhum, então exibia "Last deploy: Never" para sempre, mesmo em service deployado
+   * cinco minutos antes.
+   *
+   * A linha filha tem `appId` preenchido, `projectId` **nulo** e `parentId` apontando
+   * para a release. Deixar o projectId nulo é o que mantém `rollbackProject` e o
+   * histórico do projeto enxergando só as linhas pai. Os logs ficam só no pai, que é
+   * onde eles são produzidos.
+   */
+  private async recordServiceDeploy(
+    parentId: string,
+    appId: string,
+    version: string,
+    releasePath: string,
+    status: 'success' | 'failed',
+    commitHash?: string | null,
+    commitMessage?: string | null,
+  ): Promise<void> {
+    try {
+      await this.prisma.deploy.updateMany({ where: { appId }, data: { isCurrent: false } });
+      await this.prisma.deploy.create({
+        data: {
+          appId,
+          parentId,
+          version,
+          path: releasePath,
+          status,
+          isCurrent: status === 'success',
+          commitHash: commitHash ?? null,
+          commitMessage: commitMessage ?? null,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+        },
+      });
+    } catch (e) {
+      // Falhar aqui não pode derrubar um deploy que deu certo: é registro histórico.
+      this.logger.warn(`Não foi possível registrar o deploy do service ${appId}: ${e.message}`);
+    }
+  }
+
+  /**
+   * Fecha a linha do Deploy com status, tempos e a cronometragem por fase.
+   *
+   * Centralizado para que todo caminho de saída — sucesso, falha, cancelamento —
+   * registre o mesmo conjunto de informação. Antes só o status era gravado.
+   */
+  private async finalizeDeploy(
+    key: string,
+    deployId: string,
+    status: 'success' | 'failed' | 'cancelled',
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    const tracker = this.trackers.get(key);
+    tracker?.finish(status);
+
+    await this.prisma.deploy.update({
+      where: { id: deployId },
+      data: {
+        status,
+        finishedAt: new Date(),
+        phases: tracker ? tracker.toJSON() : undefined,
+        ...extra,
+      },
+    });
   }
 
   private async persistLogs(deployId: string) {
@@ -108,7 +556,7 @@ export class DeployService {
     }
   }
 
-  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; envVars?: string; generateSSL?: boolean }) {
+  async deploy(data: { repository: string; name: string; port: number; domain?: string; type: string; branch?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; envVars?: string; generateSSL?: boolean; source?: string }) {
     // Validate required fields
     if (!data.name || !data.repository || !data.port || !data.type) {
       throw new BadRequestException('Missing required fields: name, repository, port, type');
@@ -145,10 +593,11 @@ export class DeployService {
       startCommand: data.startCommand,
       envVars: data.envVars,
       generateSSL: data.generateSSL,
+      source: data.source,
     });
   }
 
-  async redeploy(appId: string) {
+  async redeploy(appId: string, opts: { source?: string } = {}) {
     const app = await this.prisma.app.findUnique({ where: { id: appId } });
     if (!app) throw new BadRequestException('App não encontrado');
 
@@ -157,7 +606,7 @@ export class DeployService {
     // into APPS_DIR/<app> and use ONLY app.envVars, dropping the shared project.envVars
     // (REDIS_URL / JWT_* / ENCRYPTION_KEY / etc.) and breaking the service at boot.
     if (app.projectId) {
-      return this.deployProject(app.projectId, {});
+      return this.deployProject(app.projectId, { source: opts.source });
     }
 
     // Use stored envVars and commands from the app
@@ -167,6 +616,7 @@ export class DeployService {
       buildCommand: app.buildCommand || undefined,
       migrateCommand: app.migrateCommand || undefined,
       startCommand: app.startCommand || undefined,
+      source: opts.source,
     });
   }
 
@@ -201,6 +651,13 @@ export class DeployService {
     }
   }
 
+  /**
+   * Roda um comando do usuário através do shell, transmitindo a saída ao vivo.
+   *
+   * Rejeita quando o código de saída != 0. Use `runCommandResult` quando o código de
+   * saída precisar ser inspecionado em vez de virar exceção (é o caso das migrations,
+   * onde "nada a aplicar" e "falhou" precisam ser distinguidos).
+   */
   private async runCommand(
     command: string,
     cwd: string,
@@ -208,6 +665,27 @@ export class DeployService {
     deployId?: string,
     extraEnv?: Record<string, string>
   ): Promise<string> {
+    const result = await this.runCommandResult(command, cwd, appName, deployId, extraEnv);
+    if (result.code !== 0) {
+      throw new Error(result.stderr || `Command failed with code ${result.code}`);
+    }
+    return result.stdout;
+  }
+
+  /**
+   * Igual a `runCommand`, mas resolve com o código de saída em vez de rejeitar.
+   *
+   * O processo filho é registrado em `runningProcs` enquanto vive, para o cancelamento
+   * conseguir matá-lo: sem isso, pedir cancelamento durante um `pnpm build` de três
+   * minutos não teria efeito nenhum até o build terminar sozinho.
+   */
+  private async runCommandResult(
+    command: string,
+    cwd: string,
+    appName: string,
+    deployId?: string,
+    extraEnv?: Record<string, string>
+  ): Promise<{ code: number; stdout: string; stderr: string; combined: string }> {
     return new Promise((resolve, reject) => {
       this.log(appName, `$ ${command}`, deployId);
 
@@ -231,13 +709,18 @@ export class DeployService {
         }
       });
 
+      const tracked = this.runningProcs.get(appName);
+      tracked?.add(proc);
+
       let output = '';
       let errorOutput = '';
+      let combined = '';
 
       // Stream stdout line by line in real-time
       proc.stdout.on('data', (data) => {
         const text = data.toString();
         output += text;
+        combined += text;
 
         // Split by lines and send each one
         const lines = text.split('\n');
@@ -252,6 +735,7 @@ export class DeployService {
       proc.stderr.on('data', (data) => {
         const text = data.toString();
         errorOutput += text;
+        combined += text;
 
         // Split by lines and send each one
         const lines = text.split('\n');
@@ -270,15 +754,21 @@ export class DeployService {
       });
 
       proc.on('close', (code) => {
+        tracked?.delete(proc);
         this.log(appName, `  └─ Exit code: ${code}`, deployId);
-        if (code === 0) {
-          resolve(output);
-        } else {
-          reject(new Error(errorOutput || `Command failed with code ${code}`));
+
+        // Um comando morto pelo cancelamento não é uma falha do app: o pipeline
+        // precisa distinguir para não gravar "deploy falhou" no histórico.
+        if (this.isCancelled(appName)) {
+          reject(new DeployCancelledError());
+          return;
         }
+
+        resolve({ code: code ?? -1, stdout: output, stderr: errorOutput, combined });
       });
 
       proc.on('error', (err) => {
+        tracked?.delete(proc);
         this.log(appName, `  └─ Error: ${err.message}`, deployId);
         reject(err);
       });
@@ -328,7 +818,21 @@ export class DeployService {
     return envObj;
   }
 
-  private async executeDeploy(app: any, options: { installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; envVars?: string; generateSSL?: boolean } = {}) {
+  private async executeDeploy(
+    app: any,
+    options: { installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; envVars?: string; generateSSL?: boolean; source?: string } = {},
+  ) {
+    // Um deploy por app. Duplo clique, webhook concorrente e dois pushes seguidos
+    // disputariam o symlink, o processo PM2, a porta e o vhost — ver deploy-lock.ts.
+    this.acquireLock(app.name, options.source || 'api');
+    try {
+      return await this.executeDeployLocked(app, options);
+    } finally {
+      this.releaseLock(app.name);
+    }
+  }
+
+  private async executeDeployLocked(app: any, options: { installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; envVars?: string; generateSSL?: boolean; source?: string } = {}) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
     const releaseDir = path.join(APPS_DIR, app.name, 'releases', timestamp);
     const currentLink = path.join(APPS_DIR, app.name, 'current');
@@ -343,8 +847,10 @@ export class DeployService {
         version: timestamp,
         path: releaseDir,
         status: 'building',
+        startedAt: this.trackers.get(app.name)?.startedAt ?? new Date(),
       },
     });
+    this.lock.attachDeployId(app.name, deploy.id);
 
     this.log(app.name, '▶ Starting deploy...', deploy.id);
     this.log(app.name, `  Version: ${timestamp}`, deploy.id);
@@ -451,12 +957,7 @@ export class DeployService {
           (hasPrisma ? execCmd(pm, { pkg: scopePkg, argv: ['prisma', 'migrate', 'deploy'] }) : null);
         if (migrateCmd) {
           this.log(app.name, '▶ Running migrations...', deploy.id);
-          try {
-            await this.runCommand(migrateCmd, releaseDir, app.name, deploy.id, envVarsObj);
-            this.log(app.name, '✓ Migrations applied', deploy.id);
-          } catch (e) {
-            this.log(app.name, '  ⚠ No migrations to apply or error', deploy.id);
-          }
+          await this.runMigration(migrateCmd, releaseDir, app.name, '', deploy.id, envVarsObj);
         }
       }
 
@@ -512,15 +1013,14 @@ export class DeployService {
           effectiveType,
         });
         const configPath = path.join(APPS_DIR, app.name, 'ecosystem.config.js');
-        await fs.promises.writeFile(configPath, pm2Config);
-
-        try {
-          await run('pm2', ['delete', app.name]);
-          this.log(app.name, '  Stopped existing process', deploy.id);
-        } catch { /* empty */ }
-
-        await run('pm2', ['start', configPath]);
-        await run('pm2', ['save']);
+        await this.startOrReloadPm2({
+          name: app.name,
+          configPath,
+          nextConfig: pm2Config,
+          previousRuntime: app.activeRuntime,
+          key: app.name,
+          deployId: deploy.id,
+        });
         this.log(app.name, `✓ PM2 process started on port ${app.port}`, deploy.id);
       } else {
         // For Vite.js static apps, copy dist to /var/www/{app_name}
@@ -563,6 +1063,30 @@ export class DeployService {
         this.log(app.name, `  ⚠️ SSL generation skipped - domínio inválido: ${app.domain}`, deploy.id);
       }
 
+      // Health check antes de declarar sucesso.
+      //
+      // Um app estático é servido pelo nginx a partir de /var/www: não há processo para
+      // checar, e a porta do painel nem está ouvindo. Por isso a etapa é pulada.
+      this.throwIfCancelled(app.name);
+      if (runtimeKind !== 'static') {
+        this.setPhase(app.name, 'health-check');
+        const problema = await this.verifyHealth(app, app.name, deploy.id);
+
+        if (problema === 'cancelado') throw new DeployCancelledError();
+
+        if (problema) {
+          this.log(app.name, '', deploy.id);
+          this.log(app.name, `❌ Health check falhou: ${problema}`, deploy.id);
+          this.setPhase(app.name, 'rollback');
+          const voltou = await this.rollbackToPreviousRelease(app, app.name, deploy.id, deploy.id);
+          throw new Error(
+            voltou
+              ? `App não respondeu após o deploy (${problema}). Rollback automático aplicado.`
+              : `App não respondeu após o deploy (${problema}). Não havia release anterior para voltar.`,
+          );
+        }
+      }
+
       // Mark deploy as success and persist logs
       await this.prisma.deploy.updateMany({ where: { appId: app.id }, data: { isCurrent: false } });
 
@@ -572,10 +1096,7 @@ export class DeployService {
       // Persist all accumulated logs
       await this.persistLogs(deploy.id);
 
-      await this.prisma.deploy.update({
-        where: { id: deploy.id },
-        data: { status: 'success', isCurrent: true },
-      });
+      await this.finalizeDeploy(app.name, deploy.id, 'success', { isCurrent: true });
 
       await this.prisma.app.update({
         where: { id: app.id },
@@ -599,23 +1120,22 @@ export class DeployService {
 
       return { success: true, version: timestamp, deploy };
     } catch (error) {
-      const errorMessage = error.message || 'Unknown error';
+      const cancelado = error instanceof DeployCancelledError;
+      const errorMessage = cancelado ? 'Deploy cancelado pelo operador' : (error.message || 'Unknown error');
 
       this.log(app.name, '', deploy.id);
-      this.log(app.name, `❌ Deploy failed: ${errorMessage}`, deploy.id);
+      this.log(app.name, cancelado ? '⛔ Deploy cancelado' : `❌ Deploy failed: ${errorMessage}`, deploy.id);
 
       // Persist all accumulated logs before marking as failed
       await this.persistLogs(deploy.id);
 
-      // Mark deploy as failed
-      await this.prisma.deploy.update({
-        where: { id: deploy.id },
-        data: { status: 'failed' },
-      });
+      await this.finalizeDeploy(app.name, deploy.id, cancelado ? 'cancelled' : 'failed');
 
+      // Um cancelamento não troca o symlink, então o app segue no release anterior.
+      // Marcá-lo como 'error' assustaria à toa; o status real é recalculado na leitura.
       await this.prisma.app.update({
         where: { id: app.id },
-        data: { status: 'error' },
+        data: { status: cancelado ? 'running' : 'error' },
       });
 
       await this.prisma.systemLog.create({
@@ -674,9 +1194,20 @@ export class DeployService {
     };
   }
 
-  async deployProject(projectId: string, opts: { generateSSL?: boolean } = {}) {
+  async deployProject(projectId: string, opts: { generateSSL?: boolean; source?: string } = {}) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId }, include: { apps: true } });
     if (!project) throw new BadRequestException('Projeto não encontrado');
+
+    this.acquireLock(project.name, opts.source || 'api');
+    try {
+      return await this.deployProjectLocked(project, opts);
+    } finally {
+      this.releaseLock(project.name);
+    }
+  }
+
+  private async deployProjectLocked(project: any, opts: { generateSSL?: boolean } = {}) {
+    const projectId: string = project.id;
     const services = project.apps;
     if (services.length === 0) throw new BadRequestException('Projeto sem services');
 
@@ -686,8 +1217,15 @@ export class DeployService {
     const key = project.name; // log/stream key
 
     const deploy = await this.prisma.deploy.create({
-      data: { projectId: project.id, version: timestamp, path: releaseDir, status: 'building' },
+      data: {
+        projectId: project.id,
+        version: timestamp,
+        path: releaseDir,
+        status: 'building',
+        startedAt: this.trackers.get(key)?.startedAt ?? new Date(),
+      },
     });
+    this.lock.attachDeployId(key, deploy.id);
     this.log(key, '▶ Starting project deploy...', deploy.id);
     this.log(key, `  Project: ${project.name} — ${services.length} services`, deploy.id);
     await this.prisma.project.update({ where: { id: project.id }, data: { status: 'deploying' } });
@@ -759,11 +1297,7 @@ export class DeployService {
         const migrateCmd = svc.migrateCommand || (hasPrisma ? execCmd(pm, { pkg, argv: ['prisma', 'migrate', 'deploy'] }) : null);
         if (migrateCmd) {
           this.log(key, `▶ [${svc.name}] Migrations...`, deploy.id);
-          try {
-            await this.runCommand(migrateCmd, releaseDir, key, deploy.id, svcEnv);
-          } catch {
-            this.log(key, `  ⚠ [${svc.name}] no migrations or error`, deploy.id);
-          }
+          await this.runMigration(migrateCmd, releaseDir, key, svc.name, deploy.id, svcEnv);
         }
       }
 
@@ -791,15 +1325,28 @@ export class DeployService {
 
       // Start each service (partial failure allowed)
       this.setPhase(key, 'starting');
+      this.throwIfCancelled(key);
       const failures: string[] = [];
       for (const svc of services) {
         try {
           await this.startService(project.name, svc, currentLink, pm, projectEnv, opts.generateSSL, runtimes.get(svc.id));
+
+          // Health check por service. Estático não tem processo para checar.
+          const kind = runtimes.get(svc.id)?.kind;
+          if (kind !== 'static') {
+            const problema = await this.verifyHealth(svc, key, deploy.id);
+            if (problema === 'cancelado') throw new DeployCancelledError();
+            if (problema) throw new Error(`health check: ${problema}`);
+          }
+
           await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', currentPath: releaseDir } });
+          await this.recordServiceDeploy(deploy.id, svc.id, timestamp, releaseDir, 'success', deploy.commitHash, deploy.commitMessage);
         } catch (e) {
+          if (e instanceof DeployCancelledError) throw e;
           failures.push(svc.name);
           this.log(key, `❌ [${svc.name}] start failed: ${e.message}`, deploy.id);
           await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'error' } });
+          await this.recordServiceDeploy(deploy.id, svc.id, timestamp, releaseDir, 'failed', deploy.commitHash, deploy.commitMessage);
         }
       }
 
@@ -807,17 +1354,21 @@ export class DeployService {
       const projFailed = failures.length === services.length;
       await this.prisma.deploy.updateMany({ where: { projectId: project.id }, data: { isCurrent: false } });
       await this.persistLogs(deploy.id);
-      await this.prisma.deploy.update({ where: { id: deploy.id }, data: { status: projFailed ? 'failed' : 'success', isCurrent: !projFailed } });
+      await this.finalizeDeploy(key, deploy.id, projFailed ? 'failed' : 'success', { isCurrent: !projFailed });
       await this.prisma.project.update({ where: { id: project.id }, data: { status: projFailed ? 'error' : 'running', currentPath: releaseDir } });
       this.log(key, ok ? '🚀 Project deploy completed!' : (projFailed ? '❌ Project deploy failed' : `⚠️ Partial deploy — failed: ${failures.join(', ')}`), deploy.id);
       this.deployGateway.emitDeployComplete(key, !projFailed, { version: timestamp, deploy, failures });
       return { success: !projFailed, partial: !ok && !projFailed, failures, version: timestamp, deploy };
     } catch (error) {
-      const msg = error.message || 'Unknown error';
-      this.log(key, `❌ Project deploy failed: ${msg}`, deploy.id);
+      const cancelado = error instanceof DeployCancelledError;
+      const msg = cancelado ? 'Deploy cancelado pelo operador' : (error.message || 'Unknown error');
+      this.log(key, cancelado ? '⛔ Project deploy cancelado' : `❌ Project deploy failed: ${msg}`, deploy.id);
       await this.persistLogs(deploy.id);
-      await this.prisma.deploy.update({ where: { id: deploy.id }, data: { status: 'failed' } });
-      await this.prisma.project.update({ where: { id: project.id }, data: { status: 'error' } });
+      await this.finalizeDeploy(key, deploy.id, cancelado ? 'cancelled' : 'failed');
+      await this.prisma.project.update({
+        where: { id: project.id },
+        data: { status: cancelado ? 'running' : 'error' },
+      });
       this.deployGateway.emitDeployComplete(key, false, { error: msg });
       throw new BadRequestException(`Deploy do projeto falhou: ${msg}`);
     }
@@ -862,11 +1413,26 @@ export class DeployService {
    * symlink — the other services of the project keep running untouched. Used both to
    * add a service to a live project and to re-apply a service's config (env, domain).
    */
-  async deployProjectService(projectId: string, appId: string, opts: { generateSSL?: boolean } = {}) {
+  async deployProjectService(projectId: string, appId: string, opts: { generateSSL?: boolean; source?: string } = {}) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId }, include: { apps: true } });
     if (!project) throw new BadRequestException('Projeto não encontrado');
     const svc = project.apps.find((a) => a.id === appId);
     if (!svc) throw new BadRequestException('Service não pertence a este projeto');
+
+    // Trava na chave do PROJETO, não do service: o deploy incremental mexe no release
+    // compartilhado (install na raiz, build do workspace), então rodar dois ao mesmo
+    // tempo — ou um incremental junto com um redeploy do projeto — corromperia o
+    // node_modules compartilhado.
+    this.acquireLock(project.name, opts.source || 'api');
+    try {
+      return await this.deployProjectServiceLocked(project, svc, opts);
+    } finally {
+      this.releaseLock(project.name);
+    }
+  }
+
+  private async deployProjectServiceLocked(project: any, svc: any, opts: { generateSSL?: boolean } = {}) {
+    const projectId: string = project.id;
 
     const currentLink = path.join(APPS_DIR, project.name, 'current');
     const releaseDir = await this.assertReleaseReady(project, svc.appDir);
@@ -884,8 +1450,10 @@ export class DeployService {
         path: releaseDir,
         status: 'building',
         isCurrent: false,
+        startedAt: this.trackers.get(key)?.startedAt ?? new Date(),
       },
     });
+    this.lock.attachDeployId(key, deploy.id);
 
     this.log(key, `▶ [${svc.name}] Incremental deploy into ${releaseDir}`, deploy.id);
     await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'deploying' } });
@@ -933,11 +1501,7 @@ export class DeployService {
         : null;
       if (migrateCmd) {
         this.log(key, `▶ [${svc.name}] Migrations...`, deploy.id);
-        try {
-          await this.runCommand(migrateCmd, releaseDir, key, deploy.id, svcEnv);
-        } catch {
-          this.log(key, `  ⚠ [${svc.name}] no migrations or error`, deploy.id);
-        }
+        await this.runMigration(migrateCmd, releaseDir, key, svc.name, deploy.id, svcEnv);
       }
 
       // Build only this package. Turbo also rebuilds the workspace packages it depends on;
@@ -955,8 +1519,18 @@ export class DeployService {
 
       // Start only this service — PM2/docker/static + nginx + optional certbot.
       this.setPhase(key, 'starting');
+      this.throwIfCancelled(key);
       await this.startService(project.name, svc, currentLink, pm, projectEnv, opts.generateSSL, runtime);
+
+      if (runtime.kind !== 'static') {
+        this.setPhase(key, 'health-check');
+        const problema = await this.verifyHealth(svc, key, deploy.id);
+        if (problema === 'cancelado') throw new DeployCancelledError();
+        if (problema) throw new Error(`App não respondeu após o deploy (${problema})`);
+      }
+
       await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', currentPath: releaseDir } });
+      await this.recordServiceDeploy(deploy.id, svc.id, deploy.version, releaseDir, 'success');
 
       // Recompute the project's overall status from its apps now that this service is
       // marked 'running' — an incremental deploy that fixes the last broken service
@@ -966,15 +1540,16 @@ export class DeployService {
       await this.prisma.project.update({ where: { id: project.id }, data: { status: projectStatus } });
 
       await this.persistLogs(deploy.id);
-      await this.prisma.deploy.update({ where: { id: deploy.id }, data: { status: 'success' } });
+      await this.finalizeDeploy(key, deploy.id, 'success');
       this.log(key, `🚀 [${svc.name}] deployed — other services untouched`, deploy.id);
       this.deployGateway.emitDeployComplete(key, true, { version: deploy.version, deploy });
       return { success: true as const, version: deploy.version, deploy };
     } catch (error) {
-      const msg = error.message || 'Unknown error';
-      this.log(key, `❌ [${svc.name}] deploy failed: ${msg}`, deploy.id);
+      const cancelado = error instanceof DeployCancelledError;
+      const msg = cancelado ? 'Deploy cancelado pelo operador' : (error.message || 'Unknown error');
+      this.log(key, cancelado ? `⛔ [${svc.name}] deploy cancelado` : `❌ [${svc.name}] deploy failed: ${msg}`, deploy.id);
       await this.persistLogs(deploy.id);
-      await this.prisma.deploy.update({ where: { id: deploy.id }, data: { status: 'failed' } });
+      await this.finalizeDeploy(key, deploy.id, cancelado ? 'cancelled' : 'failed');
       await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'error' } });
       this.deployGateway.emitDeployComplete(key, false, { error: msg });
       throw new BadRequestException(`Deploy do service falhou: ${msg}`);
@@ -1198,14 +1773,13 @@ export class DeployService {
         effectiveType,
       });
       const cfgPath = path.join(APPS_DIR, projectName, `${svc.name}.ecosystem.config.js`);
-      await fs.promises.writeFile(cfgPath, cfg);
-      try {
-        await run('pm2', ['delete', svc.name]);
-      } catch {
-        /* not running */
-      }
-      await run('pm2', ['start', cfgPath]);
-      await run('pm2', ['save']);
+      await this.startOrReloadPm2({
+        name: svc.name,
+        configPath: cfgPath,
+        nextConfig: cfg,
+        previousRuntime: svc.activeRuntime,
+        key: projectName,
+      });
       this.log(projectName, `✓ [${svc.name}] PM2 on port ${svc.port}`);
     } else {
       await this.stopDockerApp(svc).catch(() => undefined);

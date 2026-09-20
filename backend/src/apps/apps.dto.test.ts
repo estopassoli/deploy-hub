@@ -78,6 +78,7 @@ test('UpdateAppDto preserva todos os campos que a UI envia', async () => {
     runtime: 'docker',
     containerPort: 8080,
     dockerContext: '.',
+    healthPath: '/health',
   };
 
   const result = await run(UpdateAppDto, body);
@@ -114,6 +115,7 @@ test('UpdateAppDto deixa campo ausente como undefined num update parcial', async
     'runtime',
     'containerPort',
     'dockerContext',
+    'healthPath',
   ]) {
     assert.equal(result[field], undefined, `${field} não pode ganhar valor num update parcial`);
   }

@@ -37,6 +37,7 @@ model App {
   activeRuntime    String?   // what actually runs it right now: pm2 | docker | static
   containerPort    Int?      // port inside the container; defaults to the Dockerfile EXPOSE, else `port`
   dockerContext    String?   // build context relative to the repo root; defaults to the repo root
+  healthPath       String?   // caminho HTTP checado depois do start; default '/' quando null
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   deploys         Deploy[]
@@ -71,10 +72,31 @@ model Deploy {
   commitHash  String?
   commitMessage String?
   path        String   // full path to release
-  status      String   @default("pending") // pending, building, success, failed
+  status      String   @default("pending") // pending, building, success, failed, cancelled
   isCurrent   Boolean  @default(false)
   logs        String?  // Full deploy logs persisted
+  startedAt   DateTime? // início efetivo do pipeline
+  finishedAt  DateTime? // fim, com sucesso ou não
+  phases      String?  // JSON: [{ name, startedAt, finishedAt, durationMs, status }]
+
+  // Release de projeto monorepo -> uma linha filha por service.
+  //
+  // A linha pai carrega os logs e o isCurrent (é ela que o rollback usa); cada filha
+  // tem appId preenchido e projectId nulo, para o card do service conseguir achar o
+  // próprio deploy em vez de mostrar "Last deploy: Never" para sempre.
+  //
+  // Coluna simples, DE PROPÓSITO, sem `@relation` para o próprio Deploy. Uma FK de
+  // auto-relação não pode ser adicionada por ALTER TABLE no SQLite: o Prisma resolveria
+  // com DROP TABLE + recriação + INSERT...SELECT. Os dados seriam copiados, mas dropar
+  // a tabela de histórico (com todos os logs de deploy) de um banco de produção é risco
+  // que esta feature não justifica. Sem a FK, a limpeza das filhas é feita em código.
+  parentId    String?
+
   createdAt   DateTime @default(now())
+
+  @@index([appId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([parentId])
 }
 
 model SystemLog {

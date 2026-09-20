@@ -14,6 +14,17 @@ export interface AppVersion {
   isCurrent: boolean;
 }
 
+/** Uma fase do pipeline, como gravada em `Deploy.phases`. */
+export interface DeployPhase {
+  name: string;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  status: 'running' | 'success' | 'failed' | 'skipped' | 'cancelled';
+}
+
+export type DeployStatus = 'pending' | 'building' | 'success' | 'failed' | 'cancelled';
+
 export interface App {
   id: string;
   name: string;
@@ -37,6 +48,8 @@ export interface App {
   activeRuntime?: RuntimeKind | null;
   containerPort?: number | null;
   dockerContext?: string | null;
+  /** Caminho checado pelo health check pós-deploy. Null = `/`. */
+  healthPath?: string | null;
 }
 
 export interface DeployConfig {

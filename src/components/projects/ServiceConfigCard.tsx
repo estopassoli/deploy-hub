@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, Rocket, Save, Trash2 } from 'lucide-react';
+import { Loader2, RefreshCw, Rocket, Save, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -34,8 +34,10 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
   const [containerPort, setContainerPort] = useState(
     app.containerPort != null ? String(app.containerPort) : '',
   );
+  const [healthPath, setHealthPath] = useState(app.healthPath || '');
   const [saving, setSaving] = useState(false);
   const [deploying, setDeploying] = useState(false);
+  const [applying, setApplying] = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
@@ -49,6 +51,7 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
         migrateCommand,
         runtime,
         containerPort,
+        healthPath,
       });
       toast.success(`${app.name} salvo — use "Deploy service" para aplicar`);
       onChanged();
@@ -56,6 +59,34 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
       toast.error(e.message || 'Erro ao salvar');
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** Aplica o env na release atual e reinicia, sem refazer clone/install/build. */
+  const handleSaveAndRestart = async () => {
+    setApplying(true);
+    try {
+      await api.updateApp(app.id, {
+        domain,
+        envVars,
+        startCommand,
+        migrateCommand,
+        runtime,
+        containerPort,
+        healthPath,
+      });
+      const result = await api.applyEnv(app.id);
+
+      if (result.diff.buildRequired.length > 0) {
+        toast.warning(result.message, { duration: 10000 });
+      } else {
+        toast.success(result.message);
+      }
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao aplicar variáveis');
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -100,6 +131,16 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
           <Button size="sm" variant="outline" disabled={saving} onClick={handleSave}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Salvar
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={applying}
+            onClick={handleSaveAndRestart}
+            title="Reescreve o .env da release atual e reinicia só este service, sem refazer o build"
+          >
+            {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Salvar e reiniciar
           </Button>
           <Button size="sm" variant="gradient" disabled={deploying} onClick={handleDeploy} title="Rebuilda e reinicia só este service">
             {deploying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
@@ -151,9 +192,15 @@ export function ServiceConfigCard({ app, projectId, canRemove, onChanged }: Prop
         </div>
       </div>
 
-      <div className="space-y-1">
-        <Label className="text-xs">Migrate command (opcional)</Label>
-        <Input value={migrateCommand} onChange={(e) => setMigrateCommand(e.target.value)} className="font-mono text-sm" placeholder="pnpm prisma migrate deploy" />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label className="text-xs">Migrate command (opcional)</Label>
+          <Input value={migrateCommand} onChange={(e) => setMigrateCommand(e.target.value)} className="font-mono text-sm" placeholder="pnpm prisma migrate deploy" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Health check (opcional)</Label>
+          <Input value={healthPath} onChange={(e) => setHealthPath(e.target.value)} className="font-mono text-sm" placeholder="/" />
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">

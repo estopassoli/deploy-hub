@@ -68,7 +68,7 @@ export class WebhookService {
     });
 
     // Trigger deploy
-    const result = await this.deployService.redeploy(app.id);
+    const result = await this.deployService.redeploy(app.id, { source: 'webhook' });
 
     return {
       success: true,

@@ -98,6 +98,7 @@ export class UpdateAppDto {
   runtime?: string;
   containerPort?: number | null;
   dockerContext?: string;
+  healthPath?: string;
 }
 
 export class CreateAppDto {
@@ -135,6 +136,7 @@ for (const field of [
   'appDir',
   'workspacePackage',
   'dockerContext',
+  'healthPath',
 ] as const) {
   apply(UpdateAppDto, field, ...optionalText());
 }

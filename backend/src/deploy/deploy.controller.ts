@@ -79,13 +79,13 @@ export class DeployController {
   @UseGuards(JwtAuthGuard)
   @Post()
   async deploy(@Body() dto: DeployDto) {
-    return this.deployService.deploy(dto);
+    return this.deployService.deploy({ ...dto, source: 'ui' });
   }
 
   @UseGuards(JwtAuthGuard)
   @Post(':appId')
   async redeploy(@Param('appId') appId: string) {
-    return this.deployService.redeploy(appId);
+    return this.deployService.redeploy(appId, { source: 'ui' });
   }
 
   @UseGuards(JwtAuthGuard)
@@ -98,6 +98,25 @@ export class DeployController {
   @Get('history')
   async getHistory() {
     return this.deployService.getDeployHistory();
+  }
+
+  /** Deploys em andamento agora — alimenta o botão de cancelar no painel. */
+  @UseGuards(JwtAuthGuard)
+  @Get('running')
+  async getRunning() {
+    return this.deployService.runningDeploys();
+  }
+
+  /**
+   * Cancela o deploy em andamento.
+   *
+   * `key` é o nome do app ou do projeto — a mesma chave usada no stream de logs por
+   * WebSocket, que é o que a UI já tem em mãos na tela de deploy.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('cancel/:key')
+  async cancelDeploy(@Param('key') key: string) {
+    return this.deployService.cancel(key);
   }
 
   @UseGuards(JwtAuthGuard)

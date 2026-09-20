@@ -187,7 +187,7 @@ export class AppsService {
     return app;
   }
 
-  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; runtime?: string; containerPort?: number | string | null; dockerContext?: string }) {
+  async update(id: string, data: { domain?: string; branch?: string; envVars?: string; installCommand?: string; buildCommand?: string; migrateCommand?: string; startCommand?: string; appDir?: string; workspacePackage?: string; runtime?: string; containerPort?: number | string | null; dockerContext?: string; healthPath?: string }) {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
@@ -225,6 +225,9 @@ export class AppsService {
       updateData.containerPort = port;
     }
     if (data.dockerContext !== undefined) updateData.dockerContext = data.dockerContext || null;
+    // Caminho checado pelo health check depois do start. Vazio volta a null, que o
+    // pipeline lê como '/'.
+    if (data.healthPath !== undefined) updateData.healthPath = data.healthPath || null;
 
     const updated = await this.prisma.app.update({
       where: { id },

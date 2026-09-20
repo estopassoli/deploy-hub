@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Inject, forwardRef } from '@nestjs/common';
+import { DeployService } from '../deploy/deploy.service';
 import { AppsService } from './apps.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 // Os DTOs vivem em apps.dto.ts porque precisam ser importáveis pelos testes; veja o
@@ -8,7 +9,10 @@ import { CreateAppDto, UpdateAppDto } from './apps.dto';
 @Controller('apps')
 @UseGuards(JwtAuthGuard)
 export class AppsController {
-  constructor(private appsService: AppsService) {}
+  constructor(
+    private appsService: AppsService,
+    @Inject(forwardRef(() => DeployService)) private deployService: DeployService,
+  ) {}
 
   @Get()
   async findAll() {
@@ -58,5 +62,17 @@ export class AppsController {
   @Post(':id/rollback/:deployId')
   async rollback(@Param('id') id: string, @Param('deployId') deployId: string) {
     return this.appsService.rollback(id, deployId);
+  }
+
+  /**
+   * Reescreve o `.env` da release atual e reinicia, sem clonar nem buildar.
+   *
+   * Trocar uma senha de banco leva segundos em vez dos minutos de um deploy inteiro.
+   * A resposta traz `diff.buildRequired` com as chaves `NEXT_PUBLIC_` e `VITE_` que só
+   * valem após um redeploy, para a UI poder oferecê-lo.
+   */
+  @Post(':id/apply-env')
+  async applyEnv(@Param('id') id: string) {
+    return this.deployService.applyEnv(id);
   }
 }
