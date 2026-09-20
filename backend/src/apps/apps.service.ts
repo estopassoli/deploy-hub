@@ -189,13 +189,16 @@ export class AppsService {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
-    console.log('[AppsService] Update received:', JSON.stringify({ id, data }, null, 2));
+    // Nada de logar `data` nem `updated`: ambos carregam envVars em texto puro, e o
+    // stdout deste processo vai para o arquivo de log do PM2.
 
     // Build update data - only include fields that were explicitly sent
     const updateData: Record<string, any> = {};
     
     if (data.domain !== undefined) updateData.domain = data.domain || null;
-    if (data.branch !== undefined) updateData.branch = data.branch || null;
+    // `branch` é NOT NULL no schema: só atribui quando veio um valor de fato
+    // (o UpdateAppDto já rejeita string vazia com 400).
+    if (data.branch) updateData.branch = data.branch;
     if (data.envVars !== undefined) updateData.envVars = data.envVars || null;
     if (data.installCommand !== undefined) updateData.installCommand = data.installCommand || null;
     if (data.buildCommand !== undefined) updateData.buildCommand = data.buildCommand || null;
@@ -221,14 +224,10 @@ export class AppsService {
     }
     if (data.dockerContext !== undefined) updateData.dockerContext = data.dockerContext || null;
 
-    console.log('[AppsService] Update data to save:', JSON.stringify(updateData, null, 2));
-
     const updated = await this.prisma.app.update({
       where: { id },
       data: updateData,
     });
-
-    console.log('[AppsService] Update result:', JSON.stringify(updated, null, 2));
 
     // Update Nginx config if domain changed
     if (data.domain && data.domain !== app.domain) {

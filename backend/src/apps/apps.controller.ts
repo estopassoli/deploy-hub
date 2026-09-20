@@ -1,29 +1,9 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { AppsService } from './apps.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-
-class CreateAppDto {
-  name: string;
-  type: 'nestjs' | 'nextjs' | 'vitejs';
-  port: number;
-  domain?: string;
-  repository: string;
-  branch?: string;
-  appDir?: string;
-  workspacePackage?: string;
-}
-
-class UpdateAppDto {
-  domain?: string;
-  branch?: string;
-  envVars?: string;
-  installCommand?: string;
-  buildCommand?: string;
-  migrateCommand?: string;
-  startCommand?: string;
-  appDir?: string;
-  workspacePackage?: string;
-}
+// Os DTOs vivem em apps.dto.ts porque precisam ser importáveis pelos testes; veja o
+// cabeçalho daquele arquivo para o motivo (decorator não passa no type-stripping).
+import { CreateAppDto, UpdateAppDto } from './apps.dto';
 
 @Controller('apps')
 @UseGuards(JwtAuthGuard)

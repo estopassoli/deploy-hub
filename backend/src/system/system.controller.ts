@@ -1,11 +1,8 @@
 import { Controller, Get, Put, Body, UseGuards } from '@nestjs/common';
 import { SystemService } from './system.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-
-interface UpdateEmailSettingsDto {
-  emailEnabled: boolean;
-  emailRecipient?: string;
-}
+// Era uma interface, que o ValidationPipe ignora por completo; veja system.dto.ts.
+import { UpdateEmailSettingsDto } from './system.dto';
 
 @Controller('system')
 @UseGuards(JwtAuthGuard)

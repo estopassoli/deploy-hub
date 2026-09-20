@@ -8,7 +8,8 @@ const execAsync = promisify(exec);
 
 interface UpdateEmailSettingsDto {
   emailEnabled: boolean;
-  emailRecipient?: string;
+  // `null` é o que o DTO produz quando o campo vem vazio (veja system.dto.ts).
+  emailRecipient?: string | null;
 }
 
 @Injectable()
