@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  PREVIEW_TTL_DEFAULT,
   RETENTION_DAYS_DEFAULT,
   SETTING_KEYS,
   parseAutoCleanup,
   parseBackupRetentionDays,
+  parsePreviewTtlDays,
   parseRetentionDays,
   toBackupSettings,
   toGeneralSettings,
+  toPreviewSettings,
   validateBackupRetentionDays,
+  validateBranchPattern,
+  validatePreviewTtlDays,
   validateRetentionDays,
 } from './settings.ts';
 
@@ -93,4 +98,59 @@ test('validateBackupRetentionDays recusa fora da faixa', () => {
   for (const ruim of [0, -1, 366, 1.5, 'abc', null]) {
     assert.throws(() => validateBackupRetentionDays(ruim), /Retenção de backup/, String(ruim));
   }
+});
+
+// --- preview por branch (Fase 6.7) --------------------------------------------
+
+test('preview vem desligado e sem padrão quando não há nada gravado', () => {
+  // O ponto: depois de um `update.sh`, nenhum push pode começar a criar apps sozinho.
+  const config = toPreviewSettings([]);
+  assert.equal(config.previewEnabled, false);
+  assert.equal(config.previewBranchPattern, '');
+  assert.equal(config.previewTtlDays, PREVIEW_TTL_DEFAULT);
+});
+
+test('toPreviewSettings lê o que está gravado', () => {
+  const config = toPreviewSettings([
+    { key: 'preview_enabled', value: 'true' },
+    { key: 'preview_branch_pattern', value: 'feat/*,fix/*' },
+    { key: 'preview_ttl_days', value: '3' },
+  ]);
+  assert.deepEqual(config, {
+    previewEnabled: true,
+    previewBranchPattern: 'feat/*,fix/*',
+    previewTtlDays: 3,
+  });
+});
+
+test('TTL fora da faixa cai no default em vez de virar NaN', () => {
+  assert.equal(parsePreviewTtlDays('abc'), PREVIEW_TTL_DEFAULT);
+  assert.equal(parsePreviewTtlDays('-1'), PREVIEW_TTL_DEFAULT);
+  assert.equal(parsePreviewTtlDays('999'), PREVIEW_TTL_DEFAULT);
+  assert.equal(parsePreviewTtlDays(''), PREVIEW_TTL_DEFAULT);
+});
+
+test('TTL zero é válido e significa nunca expirar', () => {
+  assert.equal(parsePreviewTtlDays('0'), 0);
+  assert.equal(validatePreviewTtlDays(0), 0);
+});
+
+test('validatePreviewTtlDays recusa valor fora da faixa com mensagem legível', () => {
+  assert.throws(() => validatePreviewTtlDays(91), /entre 0 e 90/);
+  assert.throws(() => validatePreviewTtlDays(-1), /entre 0 e 90/);
+  assert.throws(() => validatePreviewTtlDays('x'), /entre 0 e 90/);
+});
+
+test('validateBranchPattern normaliza a lista', () => {
+  assert.equal(validateBranchPattern(' feat/* , fix/* , '), 'feat/*,fix/*');
+  assert.equal(validateBranchPattern(''), '');
+  assert.equal(validateBranchPattern(undefined), '');
+});
+
+test('validateBranchPattern recusa caracteres que não são de nome de branch', () => {
+  // O padrão vira regex em branchMatchesPattern; barrar na entrada é mais seguro que
+  // confiar no escape.
+  assert.throws(() => validateBranchPattern('feat/(a|b)'), /aceita apenas/);
+  assert.throws(() => validateBranchPattern('feat/$(rm -rf /)'), /aceita apenas/);
+  assert.throws(() => validateBranchPattern('a'.repeat(201)), /muito longo/);
 });

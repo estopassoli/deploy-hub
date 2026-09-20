@@ -32,6 +32,7 @@ import { classifyMigrationOutcome, describeMigrationOutcome } from './migration-
 import { isStaticPreset, presetOutputDir } from './app-presets';
 import { describeLimits, dockerLimitFlags, pm2MaxMemory } from './resource-limits';
 import { describeEnvDiff, diffEnv } from './env-diff';
+import { CertificateQuotaService } from '../preview/certificate-quota.service';
 import { decidePm2Strategy } from './pm2-strategy';
 import {
   detectDockerAssets,
@@ -93,6 +94,7 @@ export class DeployService implements OnModuleInit {
     private deployGateway: DeployGateway,
     private emailService: EmailService,
     private notifications: NotificationService,
+    private certQuota: CertificateQuotaService,
   ) { }
 
   // Store logs per deploy for persistence
@@ -244,6 +246,53 @@ export class DeployService implements OnModuleInit {
    *
    * Lança quando a migration falhou de verdade, abortando o deploy antes do symlink.
    */
+  /**
+   * Emite (ou renova) o certificado de um domínio, respeitando a cota do Let's Encrypt.
+   *
+   * O painel usa validação HTTP-01, que emite um certificado por domínio. O limite é de
+   * 50 por domínio registrado a cada 7 dias, e estourar deixa o domínio inteiro —
+   * inclusive os apps de produção — uma semana sem conseguir emitir. Por isso a cota é
+   * checada **antes** de chamar o certbot, e o deploy avisa em vez de gastar a última
+   * vaga sem que ninguém perceba.
+   *
+   * Cota esgotada **não** falha o deploy: o app sobe e responde em HTTP, o vhost fica
+   * sem o bloco :443 e o log diz exatamente o que aconteceu. Derrubar o deploy seria
+   * trocar "sem HTTPS" por "sem aplicação".
+   *
+   * Devolve true quando o certificado foi emitido.
+   */
+  private async issueCertificate(
+    domain: string,
+    key: string,
+    options: { appId?: string | null; deployId?: string } = {},
+  ): Promise<boolean> {
+    const { allowed, status, isRenewal, reason } = await this.certQuota.canIssue(domain);
+
+    await this.certQuota.warnIfNeeded(status, (mensagem) =>
+      this.log(key, `  ${mensagem}`, options.deployId),
+    );
+
+    if (!allowed) {
+      this.log(key, `  ⚠️ SSL de ${domain} não foi emitido: ${reason}`, options.deployId);
+      this.log(key, '  O app segue no ar em HTTP. Nenhuma vaga de emissão foi consumida.', options.deployId);
+      return false;
+    }
+
+    const email = process.env.CERTBOT_EMAIL || `admin@${domain}`;
+    await sudo('certbot', certbotArgs(domain, email), { cwd: '/tmp' });
+    await this.certQuota.record(domain, { appId: options.appId, isRenewal });
+
+    if (!isRenewal) {
+      this.log(
+        key,
+        `  Cota do Let's Encrypt: ${status.used + 1}/50 para ${status.registeredDomain}`,
+        options.deployId,
+      );
+    }
+
+    return true;
+  }
+
   private async runMigration(
     command: string,
     cwd: string,
@@ -648,10 +697,12 @@ export class DeployService implements OnModuleInit {
     } catch {
       return { domain: app.domain, ok: false, error: 'certbot não está instalado' };
     }
-    const email = process.env.CERTBOT_EMAIL || `admin@${app.domain}`;
     try {
       this.log(app.name, `▶ Generating SSL for ${app.domain}...`);
-      await sudo('certbot', certbotArgs(app.domain, email), { cwd: '/tmp' });
+      const emitido = await this.issueCertificate(app.domain, app.name, { appId: app.id });
+      if (!emitido) {
+        return { domain: app.domain, ok: false, error: 'cota do Let\'s Encrypt esgotada' };
+      }
       // Normalize the vhost to our format (:80 + :443) now that the cert exists.
       await this.updateNginxConfig(app);
       this.log(app.name, `✓ SSL ready for ${app.domain}`);
@@ -1060,9 +1111,13 @@ export class DeployService implements OnModuleInit {
           this.log(app.name, '✓ Certbot is installed', deploy.id);
 
           this.log(app.name, '▶ Generating SSL certificate with Certbot...', deploy.id);
-          const email = process.env.CERTBOT_EMAIL || `admin@${app.domain}`;
-          await sudo('certbot', certbotArgs(app.domain, email), { cwd: '/tmp' });
-          this.log(app.name, `✓ SSL certificate generated for ${app.domain}`, deploy.id);
+          const emitido = await this.issueCertificate(app.domain, app.name, {
+            appId: app.id,
+            deployId: deploy.id,
+          });
+          if (emitido) {
+            this.log(app.name, `✓ SSL certificate generated for ${app.domain}`, deploy.id);
+          }
         } catch (e) {
           if (e.message?.includes('which certbot')) {
             this.log(app.name, '  ❌ Certbot is not installed', deploy.id);
@@ -1830,8 +1885,7 @@ export class DeployService implements OnModuleInit {
       try {
         if (!isSafeDomain(svc.domain)) throw new Error(`domínio inválido: ${svc.domain}`);
         await run('which', ['certbot']);
-        const email = process.env.CERTBOT_EMAIL || `admin@${svc.domain}`;
-        await sudo('certbot', certbotArgs(svc.domain, email), { cwd: '/tmp' });
+        await this.issueCertificate(svc.domain, projectName, { appId: svc.id });
       } catch (e) {
         this.log(projectName, `  ⚠️ [${svc.name}] SSL skipped: ${e.message}`);
       }

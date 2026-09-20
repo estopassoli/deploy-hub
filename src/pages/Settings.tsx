@@ -2,6 +2,7 @@ import { Layout } from '@/components/layout/Layout';
 import { NotificationSettings } from '@/components/NotificationSettings';
 import { NotificationChannels } from '@/components/settings/NotificationChannels';
 import { BackupSettings } from '@/components/settings/BackupSettings';
+import { PreviewSettings } from '@/components/settings/PreviewSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +12,7 @@ import { api } from '@/lib/api';
 import {
   Bell,
   Database,
+  GitBranch,
   Loader2,
   Mail,
   RefreshCw,
@@ -335,6 +337,15 @@ export default function Settings() {
               <h3 className="font-semibold text-foreground">Backup</h3>
             </div>
             <BackupSettings />
+          </div>
+
+          {/* Preview por branch */}
+          <div className="rounded-xl border border-border bg-card p-6">
+            <div className="flex items-center gap-2 mb-6">
+              <GitBranch className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold text-foreground">Preview por branch</h3>
+            </div>
+            <PreviewSettings />
           </div>
 
           {/*

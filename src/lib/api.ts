@@ -1,5 +1,39 @@
 import { clearToken, getToken, setToken } from './token';
 
+
+/** Configuração de preview por branch. Ver `backend/src/system/settings.ts`. */
+export interface PreviewConfig {
+  previewEnabled: boolean;
+  /** Lista separada por vírgula, com `*` como curinga. Vazio = nenhuma branch. */
+  previewBranchPattern: string;
+  /** Dias sem push até o preview ser removido. Zero desliga a expiração. */
+  previewTtlDays: number;
+}
+
+export interface PreviewItem {
+  id: string;
+  name: string;
+  domain: string | null;
+  port: number;
+  status: string;
+  previewBranch: string | null;
+  previewOfAppId: string | null;
+  parentName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string | null;
+}
+
+/** Cota semanal do Let's Encrypt para um domínio registrado (eTLD+1). */
+export interface CertificateQuotaDomain {
+  registeredDomain: string;
+  level: 'ok' | 'warning' | 'exhausted';
+  used: number;
+  remaining: number;
+  limit: number;
+  resetsAt: string | null;
+}
+
 const API_URL = import.meta.env.VITE_API_URL || 'https://api-panel.auraai.chat/api';
 
 class ApiClient {
@@ -304,6 +338,32 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+  }
+
+  // Previews por branch (Fase 6.7)
+  async getPreviews() {
+    return this.request<{
+      items: PreviewItem[];
+      config: PreviewConfig;
+      portRange: { start: number; end: number };
+    }>('/previews');
+  }
+
+  async updatePreviewSettings(data: Partial<PreviewConfig>) {
+    return this.request<PreviewConfig>('/previews/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePreview(name: string) {
+    return this.request<{ handled: boolean; message: string }>(`/previews/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getCertificateQuota() {
+    return this.request<{ limit: number; domains: CertificateQuotaDomain[] }>('/previews/certificate-quota');
   }
 
   // Backups

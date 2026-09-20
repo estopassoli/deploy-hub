@@ -13,6 +13,7 @@ Equipes que mantêm vários serviços auto-hospedados normalmente espalham opera
 - Coletores de métricas, relatórios de uso e alertas em tempo real via websockets.
 - Consolidação de logs e atividades recentes do sistema.
 - Gateway de terminal remoto e webhook GitHub para disparar deploys automatizados.
+- Preview por branch: um push numa branch configurada sobe um app efêmero em `branch.dominio-do-app`, removido quando a branch é apagada.
 - Painel React responsivo com autenticação protegida por rota.
 
 ## Arquitetura em alto nível
@@ -136,6 +137,8 @@ O script realiza `git pull`, **verifica se `JWT_SECRET` está configurado** (abo
 | `API_URL` | URL base usada pelo serviço de webhook para chamar a API interna | `https://api-panel.auraai.chat` (ajuste para seu host) |
 | `SSH_HOST` | Host/IP acessado pelo controlador de webhooks para executar comandos remotos | _(obrigatório para deploy remoto)_ |
 | `SSH_USER` | Usuário SSH (default `root`) | `root` |
+| `PREVIEW_PORT_RANGE` | Faixa reservada às portas dos previews de branch. Um preview nunca aloca fora dela — é o que impede um ambiente efêmero de tomar a porta de um app de produção | `21000-21999` |
+| `CERTBOT_EMAIL` | Email usado pelo certbot ao emitir certificados. Sem ele o painel usa `admin@<dominio>`, que pode não existir | _(opcional)_ |
 | `RESEND_API_KEY` | Chave opcional para envio de emails via Resend | _(opcional)_ |
 
 ### Frontend (`.env`)
@@ -167,6 +170,60 @@ segredo de JWT. Elas são criptografadas no banco com **AES-256-GCM**, usando
 > `deployhub.db` sem a chave é inútil: os `envVars` não são recuperáveis. Se a chave for
 > perdida ou trocada, o deploy **falha com erro explícito** em vez de subir os apps sem
 > variável de ambiente nenhuma.
+
+## Preview por branch
+
+Um push numa branch que casa com o padrão configurado cria um app completo em
+`<branch>.<domínio do app>`, com repositório, comandos, `.env` e limites de recurso
+herdados do app de origem. Apagar a branch destrói tudo.
+
+Vem **desligado por padrão**, com padrão de branch vazio: ligar o switch em
+*Configurações → Preview por branch* sem preencher o padrão não cria nada. Preview
+gera apps, consome portas e gasta emissões de certificado — nada disso pode começar a
+acontecer sozinho depois de um `update.sh`.
+
+### O que é preciso ter antes
+
+**DNS curinga.** Cada preview é um subdomínio novo. Sem um registro `*.seu-dominio`
+apontando para este servidor, o preview sobe e fica inacessível, sem nada na tela
+indicando a causa. O painel não tem como criar esse registro.
+
+**Cota de certificados.** O `certbot --nginx` usado aqui faz validação HTTP-01, que emite
+um certificado por domínio — não existe curinga por esse caminho. O Let's Encrypt limita
+a **50 certificados por domínio registrado a cada 7 dias**, e cada branch nova consome
+uma emissão.
+
+O que torna isso sério não é o preview falhar: ao estourar a cota, **o domínio inteiro
+fica uma semana sem conseguir emitir certificado, produção incluída**. Como não há API
+para consultar a cota, o painel conta as emissões localmente e:
+
+- avisa no log do deploy a partir de 40/50, antes de o limite ser atingido;
+- notifica pelos canais configurados (Slack/Discord/Telegram/email), no máximo uma vez
+  por dia por domínio;
+- mostra a barra por domínio em *Configurações → Preview por branch*;
+- ao chegar em 50, **não chama o certbot**: o app sobe em HTTP, o log explica por quê, e
+  nenhuma vaga é desperdiçada. Derrubar o deploy seria trocar "sem HTTPS" por "sem
+  aplicação".
+
+Renovação de um certificado que já existe não conta no limite e nunca é bloqueada — do
+contrário o painel deixaria certificados vencerem por engano.
+
+### Ciclo de vida
+
+| Evento no GitHub | O que acontece |
+| --- | --- |
+| `push` na branch configurada do app | Deploy normal, como sempre foi |
+| `push` numa branch que casa com o padrão | Cria o preview, ou redeploya se já existir |
+| `create` de branch | Nada — a branch nova aponta para o mesmo commit da base; o preview nasce no primeiro push |
+| `delete` de branch, ou `push` com `deleted: true` | Remove o preview: processo, vhost do Nginx e arquivos |
+| Nenhum push por N dias | A limpeza das 4h remove o preview (TTL configurável; `0` desliga) |
+
+O TTL existe porque o evento de branch apagada depende de o webhook assiná-lo e de a
+branch ser de fato removida — nenhum dos dois é garantido. Sem ele, um preview esquecido
+segura porta, disco e um processo no PM2 para sempre.
+
+Portas saem sempre de `PREVIEW_PORT_RANGE`. Se a faixa lotar, o preview falha com
+mensagem clara em vez de procurar porta em outro lugar e colidir com produção.
 
 ## Scripts úteis
 

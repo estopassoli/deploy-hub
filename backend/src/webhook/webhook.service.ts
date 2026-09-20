@@ -2,12 +2,15 @@ import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/
 import * as crypto from 'crypto';
 import { DeployService } from '../deploy/deploy.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PreviewService } from '../preview/preview.service';
+import { parseBranchEvent } from '../preview/branch-event';
 
 @Injectable()
 export class WebhookService {
   constructor(
     private prisma: PrismaService,
     private deployService: DeployService,
+    private previewService: PreviewService,
   ) { }
 
   async handleGitHubWebhook(appName: string, signature: string, event: string, payload: any, rawBody?: Buffer) {
@@ -44,18 +47,41 @@ export class WebhookService {
       console.log(`[Webhook] No webhook secret configured, skipping signature verification`);
     }
 
-    // Only handle push events
-    if (event !== 'push') {
-      return { message: `Evento ${event} ignorado` };
+    const branchEvent = parseBranchEvent(event, payload);
+
+    if (branchEvent.kind === 'ignore') {
+      return { message: branchEvent.reason || `Evento ${event} ignorado` };
     }
 
-    // Check if push is to the configured branch
-    const ref = payload.ref || '';
-    const branch = ref.replace('refs/heads/', '');
+    const branch = branchEvent.branch;
 
-    if (branch !== app.branch) {
-      return { message: `Push para branch ${branch} ignorado (configurado: ${app.branch})` };
+    // Branch configurada do app: o caminho de sempre, deploy normal. Nada aqui muda
+    // para quem já usa o webhook.
+    if (branchEvent.kind === 'push' && branch === app.branch) {
+      return this.deployConfiguredBranch(app, appName, payload);
     }
+
+    // Qualquer outra branch é território de preview. Um preview não gera preview de si
+    // mesmo — senão um push numa branch de preview criaria um neto.
+    if (app.isPreview) {
+      return { message: `Push para branch ${branch} ignorado (${appName} é um preview)` };
+    }
+
+    const resultado = await this.previewService.handleBranchEvent(
+      { id: app.id, name: app.name, domain: app.domain },
+      branch,
+      branchEvent.kind,
+    );
+
+    return { success: resultado.handled, message: resultado.message, preview: resultado.previewName };
+  }
+
+  /** Deploy da branch configurada — o comportamento que o webhook sempre teve. */
+  private async deployConfiguredBranch(
+    app: { id: string },
+    appName: string,
+    payload: any,
+  ) {
 
     // Log webhook received
     await this.prisma.systemLog.create({

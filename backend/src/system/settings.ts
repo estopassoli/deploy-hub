@@ -21,6 +21,9 @@ export const SETTING_KEYS = {
   backupEnabled: 'backup_enabled',
   backupRetentionDays: 'backup_retention_days',
   backupApps: 'backup_apps',
+  previewEnabled: 'preview_enabled',
+  previewBranchPattern: 'preview_branch_pattern',
+  previewTtlDays: 'preview_ttl_days',
 } as const;
 
 export const RETENTION_DAYS_DEFAULT = 30;
@@ -131,5 +134,75 @@ export function toBackupSettings(rows: Array<{ key: string; value: string }>): B
     backupEnabled: parseFlag(map.get(SETTING_KEYS.backupEnabled), DEFAULT_BACKUP_SETTINGS.backupEnabled),
     backupRetentionDays: parseBackupRetentionDays(map.get(SETTING_KEYS.backupRetentionDays)),
     backupApps: parseFlag(map.get(SETTING_KEYS.backupApps), DEFAULT_BACKUP_SETTINGS.backupApps),
+  };
+}
+
+// --- preview por branch (Fase 6.7) --------------------------------------------
+
+export const PREVIEW_TTL_DEFAULT = 7;
+export const PREVIEW_TTL_MIN = 1;
+export const PREVIEW_TTL_MAX = 90;
+
+export interface PreviewSettings {
+  previewEnabled: boolean;
+  /**
+   * Lista separada por vírgula, com `*` como curinga: `feat/*,fix/*`.
+   * Vazio significa nenhuma branch — ver `branchMatchesPattern`.
+   */
+  previewBranchPattern: string;
+  /** Dias sem push até o preview ser removido. Zero desliga a expiração. */
+  previewTtlDays: number;
+}
+
+export const DEFAULT_PREVIEW_SETTINGS: PreviewSettings = {
+  // Desligado por padrão. Preview cria apps, consome portas e gasta emissões de
+  // certificado; nada disso pode começar a acontecer sozinho depois de um update.
+  previewEnabled: false,
+  previewBranchPattern: '',
+  previewTtlDays: PREVIEW_TTL_DEFAULT,
+};
+
+export function parsePreviewTtlDays(raw: string | null | undefined): number {
+  const value = parseInt((raw || '').trim(), 10);
+  if (!Number.isFinite(value)) return PREVIEW_TTL_DEFAULT;
+  if (value < 0 || value > PREVIEW_TTL_MAX) return PREVIEW_TTL_DEFAULT;
+  return value;
+}
+
+export function validatePreviewTtlDays(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
+  // Zero é válido e significa "nunca expira" — é uma escolha, não um valor inválido.
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > PREVIEW_TTL_MAX) {
+    throw new Error(`TTL de preview deve ser um inteiro entre 0 e ${PREVIEW_TTL_MAX} dias (0 desliga a expiração)`);
+  }
+  return parsed;
+}
+
+/**
+ * Valida o padrão de branch.
+ *
+ * Recusa caracteres que não aparecem em nome de branch do git — o padrão vira regex em
+ * `branchMatchesPattern`, e é melhor barrar a entrada do que confiar no escape.
+ */
+export function validateBranchPattern(value: unknown): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  if (raw.length > 200) throw new Error('Padrão de branch muito longo (máximo 200 caracteres)');
+  if (!/^[A-Za-z0-9._/*,\- ]+$/.test(raw)) {
+    throw new Error('Padrão de branch aceita apenas letras, números, . _ - / * e vírgula');
+  }
+  return raw
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join(',');
+}
+
+export function toPreviewSettings(rows: Array<{ key: string; value: string }>): PreviewSettings {
+  const map = new Map(rows.map((row) => [row.key, row.value]));
+  return {
+    previewEnabled: parseFlag(map.get(SETTING_KEYS.previewEnabled), DEFAULT_PREVIEW_SETTINGS.previewEnabled),
+    previewBranchPattern: (map.get(SETTING_KEYS.previewBranchPattern) || '').trim(),
+    previewTtlDays: parsePreviewTtlDays(map.get(SETTING_KEYS.previewTtlDays)),
   };
 }

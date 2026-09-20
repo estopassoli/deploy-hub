@@ -48,6 +48,11 @@ model App {
   // mesmo com app caído.
   desiredState     String    @default("running")
 
+  // Preview de branch (Fase 6.7). Um preview é um App normal com pai e prazo.
+  isPreview        Boolean   @default(false)
+  previewOfAppId   String?   // app do qual herda repo, tipo, comandos e env base
+  previewBranch    String?   // branch que o originou
+
   // Limites de recurso (Fase 6.4). Null = sem limite explícito.
   //
   // No PM2 vira `max_memory_restart`; no Docker, `--memory` e `--cpus`. A diferença de
@@ -183,6 +188,24 @@ model AuditLog {
   @@index([createdAt])
   @@index([action, createdAt])
   @@index([targetId, createdAt])
+}
+
+// Emissões de certificado, para controlar a cota do Let's Encrypt.
+//
+// O limite é de 50 certificados por domínio registrado a cada 7 dias, e estourar deixa
+// o domínio inteiro — inclusive os apps de produção — uma semana sem conseguir emitir.
+// Como não dá para consultar a cota no Let's Encrypt, ela é contada aqui.
+model CertificateIssuance {
+  id        String   @id @default(uuid())
+  domain    String   // hostname exato para o qual o certificado foi emitido
+  appId     String?
+  // false quando foi renovação de um domínio que já tinha certificado: o Let's Encrypt
+  // não conta renovação no limite de 50.
+  countsToQuota Boolean @default(true)
+  issuedAt  DateTime @default(now())
+
+  @@index([issuedAt])
+  @@index([domain, issuedAt])
 }
 
 model Setting {

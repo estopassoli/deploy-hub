@@ -3,10 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   BackupSettings,
   GeneralSettings,
+  PreviewSettings,
   SETTING_KEYS,
   toBackupSettings,
   toGeneralSettings,
+  toPreviewSettings,
   validateBackupRetentionDays,
+  validateBranchPattern,
+  validatePreviewTtlDays,
   validateRetentionDays,
 } from './settings';
 
@@ -69,6 +73,41 @@ export class SettingsService {
       await this.upsert(SETTING_KEYS.backupRetentionDays, String(dias));
     }
     return this.getBackup();
+  }
+
+  async getPreview(): Promise<PreviewSettings> {
+    const rows = await this.prisma.setting.findMany({
+      where: {
+        key: {
+          in: [
+            SETTING_KEYS.previewEnabled,
+            SETTING_KEYS.previewBranchPattern,
+            SETTING_KEYS.previewTtlDays,
+          ],
+        },
+      },
+      select: { key: true, value: true },
+    });
+    return toPreviewSettings(rows);
+  }
+
+  async updatePreview(input: {
+    previewEnabled?: unknown;
+    previewBranchPattern?: unknown;
+    previewTtlDays?: unknown;
+  }): Promise<PreviewSettings> {
+    if (input.previewBranchPattern !== undefined) {
+      await this.upsert(SETTING_KEYS.previewBranchPattern, validateBranchPattern(input.previewBranchPattern));
+    }
+    if (input.previewTtlDays !== undefined) {
+      await this.upsert(SETTING_KEYS.previewTtlDays, String(validatePreviewTtlDays(input.previewTtlDays)));
+    }
+    // O flag vai por último: se a validação acima falhar, o preview não é ligado com
+    // um padrão inválido gravado pela metade.
+    if (input.previewEnabled !== undefined) {
+      await this.upsert(SETTING_KEYS.previewEnabled, input.previewEnabled ? 'true' : 'false');
+    }
+    return this.getPreview();
   }
 
   private async upsert(key: string, value: string): Promise<void> {
