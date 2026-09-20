@@ -18,6 +18,9 @@
 export const SETTING_KEYS = {
   retentionDays: 'retention_days',
   autoCleanup: 'auto_cleanup',
+  backupEnabled: 'backup_enabled',
+  backupRetentionDays: 'backup_retention_days',
+  backupApps: 'backup_apps',
 } as const;
 
 export const RETENTION_DAYS_DEFAULT = 30;
@@ -72,5 +75,61 @@ export function toGeneralSettings(rows: Array<{ key: string; value: string }>): 
   return {
     retentionDays: parseRetentionDays(map.get(SETTING_KEYS.retentionDays)),
     autoCleanup: parseAutoCleanup(map.get(SETTING_KEYS.autoCleanup)),
+  };
+}
+
+// --- backup (Fase 6.6) --------------------------------------------------------
+
+export const BACKUP_RETENTION_DEFAULT = 14;
+export const BACKUP_RETENTION_MIN = 1;
+export const BACKUP_RETENTION_MAX = 365;
+
+export interface BackupSettings {
+  backupEnabled: boolean;
+  backupRetentionDays: number;
+  /** Também dumpar os bancos Postgres/MySQL declarados no .env de cada app. */
+  backupApps: boolean;
+}
+
+export const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
+  // Ligado por padrão: o banco do painel guarda o estado inteiro da operação, e o
+  // custo de um VACUUM INTO diário é desprezível.
+  backupEnabled: true,
+  backupRetentionDays: BACKUP_RETENTION_DEFAULT,
+  // Desligado por padrão: dumpar o banco de uma aplicação em produção é uma decisão
+  // consciente, não algo que deva começar a acontecer sozinho depois de um update.
+  backupApps: false,
+};
+
+export function parseBackupRetentionDays(raw: string | null | undefined): number {
+  const value = parseInt((raw || '').trim(), 10);
+  if (!Number.isFinite(value)) return BACKUP_RETENTION_DEFAULT;
+  if (value < BACKUP_RETENTION_MIN || value > BACKUP_RETENTION_MAX) return BACKUP_RETENTION_DEFAULT;
+  return value;
+}
+
+export function validateBackupRetentionDays(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
+  if (!Number.isInteger(parsed) || parsed < BACKUP_RETENTION_MIN || parsed > BACKUP_RETENTION_MAX) {
+    throw new Error(
+      `Retenção de backup deve ser um inteiro entre ${BACKUP_RETENTION_MIN} e ${BACKUP_RETENTION_MAX} dias`,
+    );
+  }
+  return parsed;
+}
+
+/** `false`/`0`/`no`/`off` desligam; ausência usa o default de cada chave. */
+function parseFlag(raw: string | null | undefined, fallback: boolean): boolean {
+  const value = (raw || '').trim().toLowerCase();
+  if (!value) return fallback;
+  return !['false', '0', 'no', 'off'].includes(value);
+}
+
+export function toBackupSettings(rows: Array<{ key: string; value: string }>): BackupSettings {
+  const map = new Map(rows.map((row) => [row.key, row.value]));
+  return {
+    backupEnabled: parseFlag(map.get(SETTING_KEYS.backupEnabled), DEFAULT_BACKUP_SETTINGS.backupEnabled),
+    backupRetentionDays: parseBackupRetentionDays(map.get(SETTING_KEYS.backupRetentionDays)),
+    backupApps: parseFlag(map.get(SETTING_KEYS.backupApps), DEFAULT_BACKUP_SETTINGS.backupApps),
   };
 }

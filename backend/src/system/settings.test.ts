@@ -4,8 +4,11 @@ import {
   RETENTION_DAYS_DEFAULT,
   SETTING_KEYS,
   parseAutoCleanup,
+  parseBackupRetentionDays,
   parseRetentionDays,
+  toBackupSettings,
   toGeneralSettings,
+  validateBackupRetentionDays,
   validateRetentionDays,
 } from './settings.ts';
 
@@ -55,4 +58,39 @@ test('toGeneralSettings monta o objeto a partir das linhas chave/valor', () => {
 test('toGeneralSettings usa defaults quando a tabela está vazia', () => {
   // É o estado de toda instalação existente: a tabela Setting nunca foi lida.
   assert.deepEqual(toGeneralSettings([]), { retentionDays: 30, autoCleanup: true });
+});
+
+// --- backup (Fase 6.6) --------------------------------------------------------
+
+test('backup vem ligado por padrão e o dump de apps desligado', () => {
+  // O banco do painel guarda o estado inteiro da operação e um VACUUM INTO diário é
+  // barato. Já dumpar o banco de uma aplicação em produção é decisão consciente — não
+  // pode começar a acontecer sozinho depois de um update.
+  const settings = toBackupSettings([]);
+  assert.equal(settings.backupEnabled, true);
+  assert.equal(settings.backupApps, false);
+  assert.equal(settings.backupRetentionDays, 14);
+});
+
+test('toBackupSettings lê o que foi gravado', () => {
+  const settings = toBackupSettings([
+    { key: SETTING_KEYS.backupEnabled, value: 'false' },
+    { key: SETTING_KEYS.backupApps, value: 'true' },
+    { key: SETTING_KEYS.backupRetentionDays, value: '30' },
+  ]);
+  assert.deepEqual(settings, { backupEnabled: false, backupApps: true, backupRetentionDays: 30 });
+});
+
+test('parseBackupRetentionDays cai no default para valor inútil', () => {
+  for (const entrada of [null, '', 'abc', '0', '-1', '999']) {
+    assert.equal(parseBackupRetentionDays(entrada as any), 14, String(entrada));
+  }
+  assert.equal(parseBackupRetentionDays('7'), 7);
+});
+
+test('validateBackupRetentionDays recusa fora da faixa', () => {
+  assert.equal(validateBackupRetentionDays(30), 30);
+  for (const ruim of [0, -1, 366, 1.5, 'abc', null]) {
+    assert.throws(() => validateBackupRetentionDays(ruim), /Retenção de backup/, String(ruim));
+  }
 });

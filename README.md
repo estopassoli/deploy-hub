@@ -128,6 +128,7 @@ O script realiza `git pull`, **verifica se `JWT_SECRET` está configurado** (abo
 | `DATABASE_URL` | String Prisma (SQLite, Postgres, etc.) | `file:./prisma/deployhub.db` |
 | `JWT_SECRET` | **Obrigatório.** Segredo usado para assinar tokens JWT — o backend não sobe sem ele. Gere com `openssl rand -hex 32` | _(sem default)_ |
 | `CORS_ORIGINS` | Origens permitidas no CORS da API e dos WebSockets, separadas por vírgula. Vazio = aceita qualquer origem (com aviso no boot) | `https://painel.seudominio.com` |
+| `BACKUP_DIR` | Diretório dos backups automáticos. Fica fora de `APPS_DIR` para não ser varrido pela limpeza de releases | `/var/backups/deployhub` |
 | `ENV_ENCRYPTION_KEY` | Chave AES-256-GCM que criptografa `App.envVars` e `Project.envVars` no banco. Gerada automaticamente pelo `update.sh` se faltar. **Guarde junto com o backup do banco** | `openssl rand -hex 32` |
 | `REGISTRATION_SECRET` | Token exigido para criar novos usuários via API. **Sem ele, `/auth/register` responde 403** e o registro fica desabilitado | _(sem default)_ |
 | `WEBHOOK_SECRET` | Segredo HMAC para validar webhooks GitHub | gerado pelo `setup.sh` |

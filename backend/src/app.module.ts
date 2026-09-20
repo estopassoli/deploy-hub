@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppsModule } from './apps/apps.module';
 import { AuditModule } from './audit/audit.module';
+import { BackupModule } from './backup/backup.module';
 import { AuthModule } from './auth/auth.module';
 import { DeployModule } from './deploy/deploy.module';
 import { EmailModule } from './email/email.module';
@@ -30,6 +31,7 @@ import { WebhookModule } from './webhook/webhook.module';
     EmailModule,
     NotificationModule,
     UptimeModule,
+    BackupModule,
     TerminalModule,
     LogsModule,
   ],

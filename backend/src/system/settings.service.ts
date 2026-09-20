@@ -1,9 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  BackupSettings,
   GeneralSettings,
   SETTING_KEYS,
+  toBackupSettings,
   toGeneralSettings,
+  validateBackupRetentionDays,
   validateRetentionDays,
 } from './settings';
 
@@ -36,6 +39,36 @@ export class SettingsService {
     }
 
     return this.getGeneral();
+  }
+
+  async getBackup(): Promise<BackupSettings> {
+    const rows = await this.prisma.setting.findMany({
+      where: {
+        key: {
+          in: [SETTING_KEYS.backupEnabled, SETTING_KEYS.backupRetentionDays, SETTING_KEYS.backupApps],
+        },
+      },
+      select: { key: true, value: true },
+    });
+    return toBackupSettings(rows);
+  }
+
+  async updateBackup(input: {
+    backupEnabled?: unknown;
+    backupRetentionDays?: unknown;
+    backupApps?: unknown;
+  }): Promise<BackupSettings> {
+    if (input.backupEnabled !== undefined) {
+      await this.upsert(SETTING_KEYS.backupEnabled, input.backupEnabled ? 'true' : 'false');
+    }
+    if (input.backupApps !== undefined) {
+      await this.upsert(SETTING_KEYS.backupApps, input.backupApps ? 'true' : 'false');
+    }
+    if (input.backupRetentionDays !== undefined) {
+      const dias = validateBackupRetentionDays(input.backupRetentionDays);
+      await this.upsert(SETTING_KEYS.backupRetentionDays, String(dias));
+    }
+    return this.getBackup();
   }
 
   private async upsert(key: string, value: string): Promise<void> {

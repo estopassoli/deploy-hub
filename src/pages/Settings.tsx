@@ -1,6 +1,7 @@
 import { Layout } from '@/components/layout/Layout';
 import { NotificationSettings } from '@/components/NotificationSettings';
 import { NotificationChannels } from '@/components/settings/NotificationChannels';
+import { BackupSettings } from '@/components/settings/BackupSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -325,6 +326,15 @@ export default function Settings() {
               </div>
 
             </div>
+          </div>
+
+          {/* Backup agendado */}
+          <div className="rounded-xl border border-border bg-card p-6">
+            <div className="flex items-center gap-2 mb-6">
+              <Database className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold text-foreground">Backup</h3>
+            </div>
+            <BackupSettings />
           </div>
 
           {/*

@@ -306,6 +306,61 @@ class ApiClient {
     });
   }
 
+  // Backups
+  async getBackups() {
+    return this.request<{
+      files: Array<{ name: string; sizeBytes: number; modifiedAt: string; kind: 'panel' | 'app'; appName?: string }>;
+      config: { backupEnabled: boolean; backupRetentionDays: number; backupApps: boolean };
+      directory: string;
+    }>('/backups');
+  }
+
+  async updateBackupSettings(data: { backupEnabled?: boolean; backupRetentionDays?: number; backupApps?: boolean }) {
+    return this.request<{ backupEnabled: boolean; backupRetentionDays: number; backupApps: boolean }>('/backups/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async runBackupNow() {
+    return this.request<{ results: Array<{ ok: boolean; file?: string; error?: string; target: string }> }>('/backups/run', {
+      method: 'POST',
+    });
+  }
+
+  async deleteBackup(name: string) {
+    return this.request<{ success: boolean }>(`/backups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Baixa um backup.
+   *
+   * Um `<a download>` não manda header, e o endpoint exige JWT. Então o arquivo é
+   * buscado com o header e entregue ao navegador como blob — o que também evita
+   * expor o token numa URL, onde ele acabaria no histórico e no log do nginx.
+   */
+  async downloadBackup(name: string): Promise<void> {
+    const token = getToken();
+    const response = await fetch(`${API_URL}/backups/download/${encodeURIComponent(name)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (!response.ok) {
+      throw new Error(`Não foi possível baixar o backup (HTTP ${response.status})`);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = name;
+      link.click();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   // Auditoria
   /** Trilha de auditoria. O servidor nunca devolve valores de variáveis nem segredos. */
   async getAuditLog(params: { limit?: number; cursor?: string; action?: string; targetId?: string; userEmail?: string } = {}) {
