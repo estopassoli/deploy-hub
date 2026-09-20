@@ -141,7 +141,10 @@ export default function Dashboard() {
     );
   }
 
-  const errorApps = apps.filter(app => app.status === 'error').length;
+  // `hasProblem` vem da API: status real != running enquanto o operador quer running.
+  // Contar só `status === 'error'` deixava o card em 0 mesmo com app caído, porque o
+  // PM2 reporta processo morto como 'stopped'/'errored', não 'error'.
+  const errorApps = apps.filter((app) => app.hasProblem ?? app.status === 'error').length;
 
   const handleDeleteProject = async (project: any) => {
     try {
@@ -218,7 +221,7 @@ export default function Dashboard() {
         <StatsCard
           title="Problemas"
           value={errorApps}
-          subtitle="Precisam atenção"
+          subtitle="Fora do ar sem ter sido parados"
           icon={<AlertCircle className="h-5 w-5 md:h-6 md:w-6" />}
           className={errorApps > 0 ? 'border-destructive/30' : ''}
         />
@@ -329,8 +332,8 @@ export default function Dashboard() {
 
         <div className="space-y-4 md:space-y-6">
           <div className="rounded-xl border border-border bg-card p-4 md:p-6">
-            <h3 className="mb-4 md:mb-6 font-semibold text-foreground text-sm md:text-base">Uso de Recursos</h3>
-            <div className="flex justify-around gap-2">
+            <h3 className="mb-4 md:mb-6 font-semibold text-foreground text-sm md:text-base">Uso de recursos</h3>
+            <div className="flex items-start justify-between gap-2 sm:gap-3">
               <UsageChart label="CPU" value={stats?.cpuUsage || 0} color="primary" />
               <UsageChart label="Memória" value={stats?.memoryUsage || 0} color="cyan" />
               <UsageChart label="Disco" value={stats?.diskUsage || 0} color="warning" />

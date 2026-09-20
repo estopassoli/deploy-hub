@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { formatTime, stripAnsi } from '@/lib/format';
 import api from '@/lib/api';
 import { wsClient } from '@/lib/websocket';
 import { toast } from 'sonner';
@@ -63,7 +64,9 @@ export default function Logs() {
           timestamp: new Date(logData.timestamp || Date.now()),
           level: logData.level || 'info',
           app: logData.app || 'system',
-          message: logData.message || logData,
+          // O `pm2 logs` repassa a saída crua dos apps, com as sequências de cor ANSI
+          // dentro. Sem isto, aparecia `\u001b[32m✓\u001b[39m` na tela.
+          message: stripAnsi(typeof logData.message === 'string' ? logData.message : String(logData.message ?? logData)),
         };
         setLogs(prev => [...prev.slice(-200), newLog]);
       };
@@ -235,7 +238,10 @@ export default function Logs() {
               filteredLogs.map((log) => (
                 <div key={log.id} className="flex gap-2 py-0.5 hover:bg-secondary/30">
                   <span className="text-muted-foreground shrink-0">
-                    {log.timestamp.toLocaleTimeString()}
+                    {/* Fuso fixo do painel: `toLocaleTimeString()` usava o fuso de
+                        quem estava olhando, o que dava 01:13 na coluna e 04:13 na
+                        própria mensagem do log. */}
+                    {formatTime(log.timestamp)}
                   </span>
                   <span className={cn('shrink-0 font-semibold uppercase w-12', levelColors[log.level])}>
                     [{log.level.slice(0, 4)}]

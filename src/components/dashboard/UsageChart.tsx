@@ -19,8 +19,11 @@ export function UsageChart({ label, value, color, subtitle }: UsageChartProps) {
   const strokeDashoffset = circumference - (value / 100) * circumference;
 
   return (
-    <div className="flex flex-col items-center">
-      <div className="relative h-28 w-28">
+    // O gauge tinha largura fixa de 112px; três deles lado a lado não cabiam no card
+    // lateral em telas médias, e o terceiro ("Disco") aparecia cortado. Agora encolhem
+    // junto com o container e nunca passam de 7rem.
+    <div className="flex min-w-0 flex-1 flex-col items-center">
+      <div className="relative aspect-square w-full max-w-[7rem]">
         <svg className="h-full w-full -rotate-90" viewBox="0 0 100 100">
           <circle
             cx="50"
@@ -53,7 +56,7 @@ export function UsageChart({ label, value, color, subtitle }: UsageChartProps) {
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-2xl font-bold text-foreground">{value}%</span>
+          <span className="text-xl sm:text-2xl font-bold text-foreground">{value}%</span>
         </div>
       </div>
       <p className="mt-2 text-sm font-medium text-foreground">{label}</p>

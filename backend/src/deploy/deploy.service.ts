@@ -1100,7 +1100,14 @@ export class DeployService implements OnModuleInit {
 
       await this.prisma.app.update({
         where: { id: app.id },
-        data: { status: 'running', currentPath: releaseDir, activeRuntime: runtimeKind },
+        data: {
+          status: 'running',
+          // Deployar é declarar que o app deve estar no ar: se ele cair depois, vira
+          // incidente no card Problemas em vez de parecer uma parada intencional.
+          desiredState: 'running',
+          currentPath: releaseDir,
+          activeRuntime: runtimeKind,
+        },
       });
 
       // Log success to system logs
@@ -1339,7 +1346,7 @@ export class DeployService implements OnModuleInit {
             if (problema) throw new Error(`health check: ${problema}`);
           }
 
-          await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', currentPath: releaseDir } });
+          await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', desiredState: 'running', currentPath: releaseDir } });
           await this.recordServiceDeploy(deploy.id, svc.id, timestamp, releaseDir, 'success', deploy.commitHash, deploy.commitMessage);
         } catch (e) {
           if (e instanceof DeployCancelledError) throw e;
@@ -1529,7 +1536,7 @@ export class DeployService implements OnModuleInit {
         if (problema) throw new Error(`App não respondeu após o deploy (${problema})`);
       }
 
-      await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', currentPath: releaseDir } });
+      await this.prisma.app.update({ where: { id: svc.id }, data: { status: 'running', desiredState: 'running', currentPath: releaseDir } });
       await this.recordServiceDeploy(deploy.id, svc.id, deploy.version, releaseDir, 'success');
 
       // Recompute the project's overall status from its apps now that this service is

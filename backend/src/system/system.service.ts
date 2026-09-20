@@ -39,6 +39,12 @@ export class SystemService {
     };
   }
 
+  /** Remove todas as linhas de SystemLog. Não toca em deploys nem em métricas. */
+  async clearSystemLogs(): Promise<{ removed: number }> {
+    const { count } = await this.prisma.systemLog.deleteMany({});
+    return { removed: count };
+  }
+
   async getSettings() {
     let settings = await this.prisma.systemSettings.findFirst();
     

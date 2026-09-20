@@ -40,15 +40,31 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import api from '@/lib/api';
+import { formatDateTime, formatElapsed } from '@/lib/format';
 import { App } from '@/types/app';
 
 interface Version {
   id: string;
   timestamp: string;
+  version?: string;
   commitHash?: string;
   commitMessage?: string;
   status?: string;
   isCurrent: boolean;
+  createdAt?: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+}
+
+/**
+ * Um rollback só faz sentido para uma release que chegou a funcionar.
+ *
+ * O botão aparecia em release `failed` também — e voltar para uma release que falhou
+ * no meio do build significa apontar o symlink para um diretório com build incompleto,
+ * trocando um app fora do ar por outro app fora do ar, com menos pistas.
+ */
+function canRollback(version: Version): boolean {
+  return !version.isCurrent && version.status === 'success';
 }
 
 export default function Versions() {
@@ -289,19 +305,35 @@ export default function Versions() {
                               {version.status === 'building' && (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-warning/20 px-2 py-0.5 text-xs font-medium text-warning">
                                   <Loader2 className="h-3 w-3 animate-spin" />
-                                  Building
+                                  Em andamento
+                                </span>
+                              )}
+                              {version.status === 'cancelled' && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                                  Cancelado
                                 </span>
                               )}
                             </div>
                             <p className="mt-1 text-sm text-muted-foreground">
-                              {version.commitMessage || 'No commit message'}
+                              {version.commitMessage || 'Sem mensagem de commit'}
                             </p>
-                            {version.commitHash && (
-                              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                                <GitCommit className="h-3 w-3" />
-                                <span className="font-mono">{version.commitHash}</span>
-                              </div>
-                            )}
+                            {/* Data, duração e commit: antes a única informação era o
+                                timestamp cru do nome da release. */}
+                            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                              <span className="inline-flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {formatDateTime(version.createdAt)}
+                              </span>
+                              <span className="inline-flex items-center gap-1">
+                                Duração: {formatElapsed(version.startedAt ?? version.createdAt, version.finishedAt)}
+                              </span>
+                              {version.commitHash && (
+                                <span className="inline-flex items-center gap-1">
+                                  <GitCommit className="h-3 w-3" />
+                                  <span className="font-mono">{version.commitHash}</span>
+                                </span>
+                              )}
+                            </div>
                           </div>
 
                           <div className="flex items-center gap-2">
@@ -313,7 +345,7 @@ export default function Versions() {
                               <FileText className="h-4 w-4" />
                               Logs
                             </Button>
-                            {!version.isCurrent && (
+                            {canRollback(version) && (
                               <>
                                 <AlertDialog>
                                   <AlertDialogTrigger asChild>
@@ -324,15 +356,15 @@ export default function Versions() {
                                   </AlertDialogTrigger>
                                   <AlertDialogContent>
                                     <AlertDialogHeader>
-                                      <AlertDialogTitle>Confirm Rollback</AlertDialogTitle>
+                                      <AlertDialogTitle>Confirmar rollback</AlertDialogTitle>
                                       <AlertDialogDescription>
-                                        This will switch the active version to <span className="font-mono">{version.timestamp}</span> and restart the PM2 process.
+                                        A versão ativa passa a ser <span className="font-mono">{version.timestamp}</span> e o processo é reiniciado.
                                       </AlertDialogDescription>
                                     </AlertDialogHeader>
                                     <AlertDialogFooter>
-                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
                                       <AlertDialogAction onClick={() => handleRollback(version.id)}>
-                                        Confirm Rollback
+                                        Confirmar rollback
                                       </AlertDialogAction>
                                     </AlertDialogFooter>
                                   </AlertDialogContent>

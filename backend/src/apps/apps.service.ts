@@ -34,6 +34,24 @@ function isDocker(app: { activeRuntime?: string | null }): boolean {
   return app.activeRuntime === 'docker';
 }
 
+/**
+ * O app está com problema?
+ *
+ * `status` é o estado real (PM2/Docker/disco) e `desiredState` é o que o operador quer.
+ * Um app parado de propósito tem status 'stopped' — e é exatamente isso que foi pedido,
+ * então não é problema. Um app que caiu sozinho tem o mesmo 'stopped', mas com
+ * desiredState 'running': aí é problema.
+ *
+ * O card "Problemas" do Dashboard contava só `status === 'error'`, e como o status real
+ * de um processo morto chega do PM2 como 'stopped' ou 'errored', o card vivia em 0
+ * mesmo com app fora do ar.
+ */
+export function hasProblem(app: { status?: string; desiredState?: string | null }): boolean {
+  if (app.status === 'error' || app.status === 'errored') return true;
+  const desired = app.desiredState ?? 'running';
+  return desired === 'running' && app.status !== 'running' && app.status !== 'deploying';
+}
+
 @Injectable()
 export class AppsService {
   constructor(private prisma: PrismaService) {}
@@ -55,6 +73,7 @@ export class AppsService {
             ...app,
             ...dockerStatus,
             currentVersion: currentDeploy?.version || '-',
+            hasProblem: hasProblem({ ...app, ...dockerStatus }),
           };
         }
 
@@ -68,6 +87,7 @@ export class AppsService {
             cpu: 0,
             memory: 0,
             currentVersion: currentDeploy?.version || '-',
+            hasProblem: hasProblem({ ...app, status: staticStatus.status }),
           };
         }
         
@@ -80,6 +100,7 @@ export class AppsService {
           cpu: pm2Status.cpu,
           memory: pm2Status.memory,
           currentVersion: currentDeploy?.version || '-',
+          hasProblem: hasProblem({ ...app, status: pm2Status.status }),
         };
       })
     );
@@ -120,7 +141,7 @@ export class AppsService {
     const status = isDocker(app)
       ? await this.getDockerStatus(app.name)
       : await this.getPM2Status(app.name);
-    return { ...app, ...status };
+    return { ...app, ...status, hasProblem: hasProblem({ ...app, ...status }) };
   }
 
   /**
@@ -318,7 +339,10 @@ export class AppsService {
     if (isDocker(app)) {
       try {
         await startContainers(app.name);
-        await this.prisma.app.update({ where: { id }, data: { status: 'running' } });
+        await this.prisma.app.update({
+          where: { id },
+          data: { status: 'running', desiredState: 'running' },
+        });
         return { success: true };
       } catch (error) {
         throw new Error(`Falha ao iniciar: ${error.message}`);
@@ -367,7 +391,10 @@ export class AppsService {
       }
 
       await run('pm2', ['save']);
-      await this.prisma.app.update({ where: { id }, data: { status: 'running' } });
+      await this.prisma.app.update({
+        where: { id },
+        data: { status: 'running', desiredState: 'running' },
+      });
       return { success: true };
     } catch (error) {
       throw new Error(`Falha ao iniciar: ${error.message}`);
@@ -384,7 +411,12 @@ export class AppsService {
       } else {
         await run('pm2', ['stop', app.name]);
       }
-      await this.prisma.app.update({ where: { id }, data: { status: 'stopped' } });
+      // `desiredState: 'stopped'` é o que distingue "parei de propósito" de "caiu":
+      // sem isso o card Problemas contaria este app como incidente para sempre.
+      await this.prisma.app.update({
+        where: { id },
+        data: { status: 'stopped', desiredState: 'stopped' },
+      });
       return { success: true };
     } catch (error) {
       throw new Error(`Falha ao parar: ${error.message}`);
@@ -411,10 +443,16 @@ export class AppsService {
     const app = await this.prisma.app.findUnique({ where: { id } });
     if (!app) throw new NotFoundException('App não encontrado');
 
-    return this.prisma.deploy.findMany({
+    const deploys = await this.prisma.deploy.findMany({
       where: { appId: id },
       orderBy: { createdAt: 'desc' },
     });
+
+    // A coluna chama `version`, mas a tela /versions lê `timestamp` — e, como o campo
+    // não existia na resposta, o nome de cada release aparecia em branco. Mesmo tipo de
+    // divergência do "Invalid Date" no card de atividade recente. Normalizado aqui, na
+    // API, mantendo `version` para quem já usa.
+    return deploys.map((deploy) => ({ ...deploy, timestamp: deploy.version }));
   }
 
   async rollback(id: string, deployId: string) {

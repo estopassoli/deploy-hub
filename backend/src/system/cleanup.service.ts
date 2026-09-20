@@ -4,20 +4,32 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
 import { assertInside } from '../common/paths';
 import { run } from '../common/run';
+import { SettingsService } from './settings.service';
 
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
-const RETENTION_DAYS = 30;
 
 @Injectable()
 export class CleanupService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private settings: SettingsService,
+  ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async cleanupOldReleases() {
-    console.log('🧹 Iniciando limpeza de releases antigas...');
+    // Retenção e liga/desliga agora vêm da tabela Setting, alimentada pela tela
+    // /settings. Antes eram uma constante no código, enquanto a UI fingia configurá-las.
+    const { retentionDays, autoCleanup } = await this.settings.getGeneral();
+
+    if (!autoCleanup) {
+      console.log('🧹 Limpeza automática desligada nas configurações — nada a fazer.');
+      return;
+    }
+
+    console.log(`🧹 Iniciando limpeza de releases com mais de ${retentionDays} dias...`);
 
     const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
     // Get old deploys that are not current
     const oldDeploys = await this.prisma.deploy.findMany({
@@ -25,7 +37,7 @@ export class CleanupService {
         createdAt: { lt: cutoffDate },
         isCurrent: false,
       },
-      include: { app: true },
+      include: { app: true, project: true },
     });
 
     for (const deploy of oldDeploys) {
@@ -49,7 +61,10 @@ export class CleanupService {
         await this.prisma.systemLog.create({
           data: {
             level: 'info',
-            message: `Release antiga removida: ${deploy.app?.name ?? 'unknown'}/${deploy.version}`,
+            // Uma release de projeto monorepo tem `appId` nulo e `projectId`
+            // preenchido: olhar só para `deploy.app` fazia toda release de projeto
+            // virar "unknown/<versão>" no log.
+            message: `Release antiga removida: ${deploy.app?.name ?? deploy.project?.name ?? 'desconhecido'}/${deploy.version}`,
             source: 'cleanup',
             appId: deploy.appId,
           },
@@ -73,8 +88,11 @@ export class CleanupService {
   // Also clean up old system logs (older than 30 days)
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async cleanupOldLogs() {
+    const { retentionDays, autoCleanup } = await this.settings.getGeneral();
+    if (!autoCleanup) return;
+
     const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
     const result = await this.prisma.systemLog.deleteMany({
       where: { createdAt: { lt: cutoffDate } },

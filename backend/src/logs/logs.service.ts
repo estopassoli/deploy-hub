@@ -17,11 +17,18 @@ export class LogsService {
         if (options.level) where.level = options.level;
         if (options.appId) where.appId = options.appId;
 
-        return this.prisma.systemLog.findMany({
+        const logs = await this.prisma.systemLog.findMany({
             where,
             orderBy: { createdAt: 'desc' },
             take: options.limit || 100,
         });
+
+        // A coluna chama `createdAt`, mas todo o resto do sistema — o stream de logs do
+        // WebSocket, o tipo LogEntry do frontend, o painel de atividade recente — usa
+        // `timestamp`. O "Invalid Date" que aparecia no card Recent Activity era
+        // exatamente isso: o componente lia `log.timestamp`, que não existia na resposta.
+        // Normalizado aqui, na API, para haver um formato só.
+        return logs.map((log) => ({ ...log, timestamp: log.createdAt.toISOString() }));
     }
 
     async createLog(data: { level: string; message: string; source?: string; appId?: string }) {

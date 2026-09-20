@@ -1,0 +1,15 @@
+-- Migration escrita à mão, de propósito.
+--
+-- O `prisma migrate dev` gera um RedefineTables (CREATE new_App + INSERT...SELECT +
+-- DROP TABLE "App") para adicionar uma coluna NOT NULL DEFAULT. Os dados seriam
+-- copiados, mas dropar e recriar a tabela central do painel — com os envVars, as
+-- portas e os vínculos de projeto de 21 apps em produção — é risco que adicionar uma
+-- coluna não justifica.
+--
+-- O SQLite aceita ADD COLUMN com NOT NULL desde que haja DEFAULT constante, que é
+-- exatamente o caso. O resultado é o mesmo, sem mover uma linha sequer.
+--
+-- `desiredState` nasce 'running' para todos: os apps que existem hoje estão no ar
+-- porque alguém os deployou, e é isso que 'running' significa. Quem estiver parado é
+-- corrigido no primeiro Stop pela UI.
+ALTER TABLE "App" ADD COLUMN "desiredState" TEXT NOT NULL DEFAULT 'running';

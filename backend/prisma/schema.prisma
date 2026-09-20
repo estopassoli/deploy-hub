@@ -38,6 +38,15 @@ model App {
   containerPort    Int?      // port inside the container; defaults to the Dockerfile EXPOSE, else `port`
   dockerContext    String?   // build context relative to the repo root; defaults to the repo root
   healthPath       String?   // caminho HTTP checado depois do start; default '/' quando null
+
+  // O que o OPERADOR quer que aconteça: running | stopped.
+  //
+  // Existe para separar "parei de propósito" de "caiu sozinho". O `status` é o estado
+  // real, lido do PM2/Docker/disco a cada leitura — e nele um app parado pelo usuário e
+  // um app que crashou aparecem os dois como 'stopped'. Sem essa distinção, o card
+  // "Problemas" do Dashboard contava só `status === 'error'` e vivia mostrando 0,
+  // mesmo com app caído.
+  desiredState     String    @default("running")
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   deploys         Deploy[]

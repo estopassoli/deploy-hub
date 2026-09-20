@@ -248,6 +248,23 @@ class ApiClient {
     return this.request<{ emailEnabled: boolean; emailRecipient: string | null; slackWebhook: string | null }>('/system/settings');
   }
 
+  /** Retenção de releases/logs e liga-desliga da limpeza automática. */
+  async getGeneralSettings() {
+    return this.request<{ retentionDays: number; autoCleanup: boolean }>('/system/settings/general');
+  }
+
+  async updateGeneralSettings(data: { retentionDays?: number; autoCleanup?: boolean }) {
+    return this.request<{ retentionDays: number; autoCleanup: boolean }>('/system/settings/general', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Apaga o histórico de logs do sistema (Danger Zone). */
+  async clearSystemLogs() {
+    return this.request<{ removed: number }>('/system/logs/clear', { method: 'POST' });
+  }
+
   async updateEmailSettings(data: { emailEnabled: boolean; emailRecipient?: string }) {
     return this.request<{ emailEnabled: boolean; emailRecipient: string | null }>('/system/settings/email', {
       method: 'PUT',

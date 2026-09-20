@@ -14,22 +14,21 @@ import {
   RefreshCw,
   Save,
   Server,
-  Shield,
   Trash2
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
+/** URL da API em uso, para a seção de servidor mostrar o que está valendo. */
+const apiBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:10001/api').trim();
+
 export default function Settings() {
-  const [settings, setSettings] = useState({
-    serverIp: '',
-    backendPort: '10001',
-    frontendPort: '10000',
-    appsPath: '~/apps',
-    retentionDays: '30',
-    autoCleanup: true,
-    slackWebhook: '',
-  });
+  // Retenção e limpeza automática agora são persistidas de verdade, na tabela Setting,
+  // e lidas pelo cron de limpeza. Antes eram estado local que o "Save" só transformava
+  // num toast de sucesso, enquanto o servidor seguia com RETENTION_DAYS = 30 fixo.
+  const [general, setGeneral] = useState({ retentionDays: 30, autoCleanup: true });
+  const [loadingGeneral, setLoadingGeneral] = useState(true);
+  const [savingGeneral, setSavingGeneral] = useState(false);
 
   const [emailSettings, setEmailSettings] = useState({
     emailEnabled: false,
@@ -38,9 +37,11 @@ export default function Settings() {
 
   const [loadingEmail, setLoadingEmail] = useState(true);
   const [savingEmail, setSavingEmail] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
 
   useEffect(() => {
     loadEmailSettings();
+    loadGeneralSettings();
   }, []);
 
   const loadEmailSettings = async () => {
@@ -54,6 +55,33 @@ export default function Settings() {
       console.error('Failed to load email settings:', error);
     } finally {
       setLoadingEmail(false);
+    }
+  };
+
+  const loadGeneralSettings = async () => {
+    try {
+      setGeneral(await api.getGeneralSettings());
+    } catch (error) {
+      console.error('Falha ao carregar configurações gerais:', error);
+    } finally {
+      setLoadingGeneral(false);
+    }
+  };
+
+  const handleSaveGeneral = async () => {
+    setSavingGeneral(true);
+    try {
+      const saved = await api.updateGeneralSettings(general);
+      setGeneral(saved);
+      toast.success(
+        saved.autoCleanup
+          ? `Limpeza automática ligada, mantendo ${saved.retentionDays} dias de releases e logs.`
+          : 'Limpeza automática desligada — nenhuma release será removida.',
+      );
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao salvar configurações');
+    } finally {
+      setSavingGeneral(false);
     }
   };
 
@@ -77,12 +105,31 @@ export default function Settings() {
     }
   };
 
-  const handleSave = () => {
-    toast.success('Settings saved successfully');
+  const [clearingLogs, setClearingLogs] = useState(false);
+
+  const handleClearLogs = async () => {
+    setClearingLogs(true);
+    try {
+      const { removed } = await api.clearSystemLogs();
+      toast.success(`${removed} registro(s) removido(s)`);
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao limpar logs');
+    } finally {
+      setClearingLogs(false);
+    }
   };
 
-  const handleTestConnection = () => {
-    toast.success('Connection test successful');
+  /** Bate de verdade no /api/system/health em vez de só mostrar um toast. */
+  const handleTestConnection = async () => {
+    setTestingConnection(true);
+    try {
+      const health = await api.healthCheck();
+      toast.success(`Backend respondeu: ${health.status}`);
+    } catch (error: any) {
+      toast.error(error.message || 'Backend não respondeu');
+    } finally {
+      setTestingConnection(false);
+    }
   };
 
   return (
@@ -90,9 +137,9 @@ export default function Settings() {
       <div className="mx-auto max-w-3xl">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Settings</h1>
+          <h1 className="text-3xl font-bold text-foreground">Configurações</h1>
           <p className="mt-1 text-muted-foreground">
-            Configure your DeployHub instance
+            Configurações do seu DeployHub
           </p>
         </div>
 
@@ -101,57 +148,38 @@ export default function Settings() {
           <div className="rounded-xl border border-border bg-card p-6">
             <div className="flex items-center gap-2 mb-6">
               <Server className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-foreground">Server Configuration</h3>
+              <h3 className="font-semibold text-foreground">Servidor</h3>
             </div>
-            
+
+            {/*
+              Estes valores vivem no `backend/.env` e no vhost do Nginx: mudá-los por
+              aqui exigiria o painel reescrever a própria configuração e se reiniciar.
+              Os campos editáveis que existiam aqui nunca fizeram nada — o "Save" só
+              exibia um toast. Viraram somente-leitura, mostrando o que está em uso.
+            */}
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="serverIp">Server IP</Label>
-                  <Input
-                    id="serverIp"
-                    value={settings.serverIp}
-                    onChange={(e) => setSettings({ ...settings, serverIp: e.target.value })}
-                    className="font-mono"
-                  />
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground">API em uso</Label>
+                  <p className="font-mono text-sm text-foreground break-all">{apiBaseUrl}</p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="appsPath">Apps Directory</Label>
-                  <Input
-                    id="appsPath"
-                    value={settings.appsPath}
-                    onChange={(e) => setSettings({ ...settings, appsPath: e.target.value })}
-                    className="font-mono"
-                  />
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground">Diretório dos apps</Label>
+                  <p className="font-mono text-sm text-foreground">
+                    definido por <span className="text-primary">APPS_DIR</span> em backend/.env
+                  </p>
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="backendPort">Backend Port</Label>
-                  <Input
-                    id="backendPort"
-                    type="number"
-                    value={settings.backendPort}
-                    onChange={(e) => setSettings({ ...settings, backendPort: e.target.value })}
-                    className="font-mono"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="frontendPort">Frontend Port</Label>
-                  <Input
-                    id="frontendPort"
-                    type="number"
-                    value={settings.frontendPort}
-                    onChange={(e) => setSettings({ ...settings, frontendPort: e.target.value })}
-                    className="font-mono"
-                  />
-                </div>
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Porta da API, diretório dos apps e domínios são configurados em
+                <span className="font-mono text-foreground"> backend/.env</span> e no Nginx,
+                aplicados no próximo restart do serviço.
+              </p>
 
-              <Button variant="outline" onClick={handleTestConnection}>
-                <RefreshCw className="h-4 w-4" />
-                Test Connection
+              <Button variant="outline" onClick={handleTestConnection} disabled={testingConnection}>
+                {testingConnection ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Testar conexão
               </Button>
             </div>
           </div>
@@ -160,39 +188,59 @@ export default function Settings() {
           <div className="rounded-xl border border-border bg-card p-6">
             <div className="flex items-center gap-2 mb-6">
               <Database className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-foreground">Version Retention</h3>
+              <h3 className="font-semibold text-foreground">Retenção de releases</h3>
             </div>
-            
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="retentionDays">Retention Period (days)</Label>
-                <Input
-                  id="retentionDays"
-                  type="number"
-                  value={settings.retentionDays}
-                  onChange={(e) => setSettings({ ...settings, retentionDays: e.target.value })}
-                  className="w-32 font-mono"
-                />
-                <p className="text-sm text-muted-foreground">
-                  Release versions older than this will be automatically deleted
-                </p>
+
+            {loadingGeneral ? (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Carregando...
               </div>
-
-              <Separator />
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-foreground">Automatic Cleanup</p>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="retentionDays">Período de retenção (dias)</Label>
+                  <Input
+                    id="retentionDays"
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={general.retentionDays}
+                    onChange={(e) =>
+                      setGeneral({ ...general, retentionDays: parseInt(e.target.value, 10) || 0 })
+                    }
+                    className="w-32 font-mono"
+                  />
                   <p className="text-sm text-muted-foreground">
-                    Run daily cron job to delete old versions
+                    Releases e logs de sistema mais antigos que isso são removidos pela limpeza
+                    diária. A release ativa nunca é apagada, independente da idade.
                   </p>
                 </div>
-                <Switch
-                  checked={settings.autoCleanup}
-                  onCheckedChange={(checked) => setSettings({ ...settings, autoCleanup: checked })}
-                />
+
+                <Separator />
+
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-medium text-foreground">Limpeza automática</p>
+                    <p className="text-sm text-muted-foreground">
+                      Roda todo dia às 3h (releases) e 4h (logs). Desligado, nada é removido e o
+                      disco cresce indefinidamente.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={general.autoCleanup}
+                    onCheckedChange={(checked) => setGeneral({ ...general, autoCleanup: checked })}
+                  />
+                </div>
+
+                <div className="flex justify-end">
+                  <Button variant="gradient" size="sm" disabled={savingGeneral} onClick={handleSaveGeneral}>
+                    {savingGeneral ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Salvar retenção
+                  </Button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Notifications */}
@@ -270,86 +318,36 @@ export default function Settings() {
                 )}
               </div>
 
-              <Separator />
-
-              <div className="space-y-2">
-                <Label htmlFor="slackWebhook">Slack Webhook URL</Label>
-                <Input
-                  id="slackWebhook"
-                  placeholder="https://hooks.slack.com/services/..."
-                  value={settings.slackWebhook}
-                  onChange={(e) => setSettings({ ...settings, slackWebhook: e.target.value })}
-                />
-                <p className="text-sm text-muted-foreground">
-                  Optional: Send deploy notifications to Slack
-                </p>
-              </div>
             </div>
           </div>
 
-          {/* Security */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <div className="flex items-center gap-2 mb-6">
-              <Shield className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-foreground">Security</h3>
-            </div>
-            
-            <div className="space-y-4">
-              <Button variant="outline">
-                Change Password
-              </Button>
-              <Button variant="outline">
-                Regenerate API Keys
-              </Button>
-              <Button variant="outline">
-                Download SSH Keys
-              </Button>
-            </div>
-          </div>
+          {/*
+            Removidos daqui: "Change Password", "Regenerate API Keys", "Download SSH
+            Keys", "Reset Configuration" e o "Save Changes" global. Nenhum deles tinha
+            backend — eram botões que não faziam nada. Cada seção agora salva a si
+            mesma, e o que sobrou na tela funciona de verdade.
+          */}
 
-          {/* Danger Zone */}
+          {/* Zona de perigo */}
           <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6">
             <div className="flex items-center gap-2 mb-6">
               <Trash2 className="h-5 w-5 text-destructive" />
-              <h3 className="font-semibold text-destructive">Danger Zone</h3>
+              <h3 className="font-semibold text-destructive">Zona de perigo</h3>
             </div>
-            
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-foreground">Clear All Logs</p>
-                  <p className="text-sm text-muted-foreground">
-                    Remove all stored log data from the database
-                  </p>
-                </div>
-                <Button variant="destructive" size="sm">
-                  Clear Logs
-                </Button>
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-foreground">Reset Configuration</p>
-                  <p className="text-sm text-muted-foreground">
-                    Reset all settings to default values
-                  </p>
-                </div>
-                <Button variant="destructive" size="sm">
-                  Reset
-                </Button>
-              </div>
-            </div>
-          </div>
 
-          {/* Save Button */}
-          <div className="flex justify-end gap-4">
-            <Button variant="outline">
-              Cancel
-            </Button>
-            <Button variant="gradient" onClick={handleSave}>
-              <Save className="h-4 w-4" />
-              Save Changes
-            </Button>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-medium text-foreground">Limpar histórico de logs</p>
+                <p className="text-sm text-muted-foreground">
+                  Apaga todos os registros de atividade do sistema. Deploys, releases e métricas
+                  não são afetados.
+                </p>
+              </div>
+              <Button variant="destructive" size="sm" disabled={clearingLogs} onClick={handleClearLogs}>
+                {clearingLogs ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Limpar logs
+              </Button>
+            </div>
           </div>
         </div>
       </div>

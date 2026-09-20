@@ -11,11 +11,17 @@
  */
 
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsOptional, MaxLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEmail, IsInt, IsOptional, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { RETENTION_DAYS_MAX, RETENTION_DAYS_MIN } from './settings.ts';
 
 export class UpdateEmailSettingsDto {
   emailEnabled: boolean;
   emailRecipient?: string | null;
+}
+
+export class UpdateGeneralSettingsDto {
+  retentionDays?: number;
+  autoCleanup?: boolean;
 }
 
 type PropDecorator = (target: object, propertyKey: string) => void;
@@ -53,4 +59,22 @@ apply(
   ValidateIf((o: UpdateEmailSettingsDto) => o.emailRecipient !== null) as PropDecorator,
   IsEmail({}, { message: 'emailRecipient deve ser um email válido' }) as PropDecorator,
   MaxLength(320) as PropDecorator,
+);
+
+apply(
+  UpdateGeneralSettingsDto,
+  'retentionDays',
+  IsOptional() as PropDecorator,
+  Transform(({ value }) => (typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : value)) as PropDecorator,
+  IsInt({ message: 'retentionDays deve ser um número inteiro' }) as PropDecorator,
+  Min(RETENTION_DAYS_MIN) as PropDecorator,
+  Max(RETENTION_DAYS_MAX) as PropDecorator,
+);
+
+apply(
+  UpdateGeneralSettingsDto,
+  'autoCleanup',
+  IsOptional() as PropDecorator,
+  Transform(({ value }) => normalizeBoolean(value)) as PropDecorator,
+  IsBoolean() as PropDecorator,
 );
