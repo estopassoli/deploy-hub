@@ -2,7 +2,12 @@ import { Controller, Get, Put, Post, Body, UseGuards } from '@nestjs/common';
 import { SystemService } from './system.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 // Era uma interface, que o ValidationPipe ignora por completo; veja system.dto.ts.
-import { UpdateEmailSettingsDto, UpdateGeneralSettingsDto } from './system.dto';
+import {
+  UpdateEmailSettingsDto,
+  UpdateGeneralSettingsDto,
+  UpdateNotificationSettingsDto,
+} from './system.dto';
+import { NotificationService } from '../notifications/notification.service';
 import { SettingsService } from './settings.service';
 
 @Controller('system')
@@ -11,6 +16,7 @@ export class SystemController {
   constructor(
     private systemService: SystemService,
     private settingsService: SettingsService,
+    private notifications: NotificationService,
   ) {}
 
   @Get('stats')
@@ -42,6 +48,37 @@ export class SystemController {
   @Put('settings/general')
   async updateGeneralSettings(@Body() dto: UpdateGeneralSettingsDto) {
     return this.settingsService.updateGeneral(dto);
+  }
+
+  /** Canais e eventos de notificação. Credenciais não são devolvidas. */
+  @Get('settings/notifications')
+  async getNotificationSettings() {
+    return this.systemService.getNotificationSettings();
+  }
+
+  @Put('settings/notifications')
+  async updateNotificationSettings(@Body() dto: UpdateNotificationSettingsDto) {
+    return this.systemService.updateNotificationSettings(dto as Record<string, unknown>);
+  }
+
+  /**
+   * Manda uma notificação de teste para todos os canais configurados.
+   *
+   * Ignora os toggles de evento de propósito: o objetivo é confirmar que a credencial
+   * funciona, não esperar um deploy falhar para descobrir que o webhook estava errado.
+   */
+  @Post('settings/notifications/test')
+  async testNotifications() {
+    const results = await this.notifications.sendTest({
+      event: 'deploy-success',
+      subject: 'teste do DeployHub',
+      detail: 'Se você está lendo isto, o canal está configurado corretamente.',
+    });
+
+    return {
+      results,
+      message: results.length === 0 ? 'Nenhum canal configurado' : undefined,
+    };
   }
 
   /**

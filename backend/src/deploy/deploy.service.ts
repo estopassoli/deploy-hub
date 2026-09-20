@@ -8,6 +8,7 @@ import { run, runQuiet, sudo } from '../common/run';
 import { isSafeDomain } from '../common/validation';
 import { AppsService } from '../apps/apps.service';
 import { EmailService } from '../email/email.service';
+import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployGateway } from './deploy.gateway';
 import {
@@ -90,6 +91,7 @@ export class DeployService implements OnModuleInit {
     @Inject(forwardRef(() => AppsService)) private appsService: AppsService,
     private deployGateway: DeployGateway,
     private emailService: EmailService,
+    private notifications: NotificationService,
   ) { }
 
   // Store logs per deploy for persistence
@@ -343,6 +345,13 @@ export class DeployService implements OnModuleInit {
       });
 
       this.log(key, `✓ Rollback automático concluído — ${app.name} voltou para ${anterior.version}`, deployId);
+      this.notifications
+        .notify({
+          event: 'rollback',
+          subject: app.name,
+          detail: `O deploy novo não respondeu ao health check. O app voltou para ${anterior.version}.`,
+        })
+        .catch(() => undefined);
       return true;
     } catch (e) {
       this.log(key, `❌ Rollback automático falhou: ${e.message}`, deployId);
@@ -1127,8 +1136,10 @@ export class DeployService implements OnModuleInit {
 
       this.deployGateway.emitDeployComplete(app.name, true, { version: timestamp, deploy });
 
-      // Send email notification for successful deploy
-      this.emailService.notifyDeploySuccess(app.name, timestamp).catch(console.error);
+      // Notificação é efeito colateral: nunca pode derrubar um deploy que deu certo.
+      this.notifications
+        .notify({ event: 'deploy-success', subject: app.name, detail: `Versão ${timestamp}` })
+        .catch(() => undefined);
 
       return { success: true, version: timestamp, deploy };
     } catch (error) {
@@ -1161,8 +1172,11 @@ export class DeployService implements OnModuleInit {
 
       this.deployGateway.emitDeployComplete(app.name, false, { error: errorMessage });
 
-      // Send email notification for failed deploy
-      this.emailService.notifyDeployFailed(app.name, errorMessage).catch(console.error);
+      if (!cancelado) {
+        this.notifications
+          .notify({ event: 'deploy-failed', subject: app.name, detail: errorMessage })
+          .catch(() => undefined);
+      }
 
       throw new BadRequestException(`Deploy falhou: ${errorMessage}`);
     }

@@ -1,5 +1,6 @@
 import { Layout } from '@/components/layout/Layout';
 import { NotificationSettings } from '@/components/NotificationSettings';
+import { NotificationChannels } from '@/components/settings/NotificationChannels';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -252,6 +253,11 @@ export default function Settings() {
             
             <div className="space-y-4">
               <NotificationSettings />
+
+              <Separator />
+
+              {/* Slack, Discord, Telegram e os eventos que disparam cada um. */}
+              <NotificationChannels />
 
               <Separator />
 

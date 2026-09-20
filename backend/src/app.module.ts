@@ -6,6 +6,7 @@ import { DeployModule } from './deploy/deploy.module';
 import { EmailModule } from './email/email.module';
 import { LogsModule } from './logs/logs.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { NotificationModule } from './notifications/notification.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProjectsModule } from './projects/projects.module';
 import { SystemModule } from './system/system.module';
@@ -24,6 +25,7 @@ import { WebhookModule } from './webhook/webhook.module';
     SystemModule,
     MetricsModule,
     EmailModule,
+    NotificationModule,
     TerminalModule,
     LogsModule,
   ],

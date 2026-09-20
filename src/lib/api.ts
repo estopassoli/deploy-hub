@@ -265,6 +265,35 @@ class ApiClient {
     });
   }
 
+  /** Canais de notificação. As credenciais nunca voltam do servidor. */
+  async getNotificationSettings() {
+    return this.request<{
+      slackConfigured: boolean;
+      discordConfigured: boolean;
+      telegramConfigured: boolean;
+      emailConfigured: boolean;
+      notifyDeployFailed: boolean;
+      notifyDeploySuccess: boolean;
+      notifyRollback: boolean;
+      notifyAppDown: boolean;
+      notifySslExpiring: boolean;
+    }>('/system/settings/notifications');
+  }
+
+  async updateNotificationSettings(data: Record<string, unknown>) {
+    return this.request<any>('/system/settings/notifications', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async testNotifications() {
+    return this.request<{
+      results: Array<{ channel: string; ok: boolean; error?: string }>;
+      message?: string;
+    }>('/system/settings/notifications/test', { method: 'POST' });
+  }
+
   /** Apaga o histórico de logs do sistema (Danger Zone). */
   async clearSystemLogs() {
     return this.request<{ removed: number }>('/system/logs/clear', { method: 'POST' });

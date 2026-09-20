@@ -138,7 +138,22 @@ model SystemSettings {
   id              String   @id @default(uuid())
   emailEnabled    Boolean  @default(false)
   emailRecipient  String?
+
+  // Canais de notificação. `slackWebhook` já existia na tabela desde a primeira
+  // migration e nunca foi usado por nada — havia um campo na UI que não salvava e
+  // nenhum código que enviasse. Agora os quatro canais são de verdade.
   slackWebhook    String?
+  discordWebhook  String?
+  telegramBotToken String?
+  telegramChatId  String?
+
+  // Quais eventos disparam notificação. Default: os três que exigem ação humana.
+  notifyDeployFailed   Boolean @default(true)
+  notifyDeploySuccess  Boolean @default(false)
+  notifyRollback       Boolean @default(true)
+  notifyAppDown        Boolean @default(true)
+  notifySslExpiring    Boolean @default(true)
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }

@@ -11,12 +11,30 @@
  */
 
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsInt, IsOptional, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEmail, IsInt, IsOptional, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { RETENTION_DAYS_MAX, RETENTION_DAYS_MIN } from './settings.ts';
 
 export class UpdateEmailSettingsDto {
   emailEnabled: boolean;
   emailRecipient?: string | null;
+}
+
+/**
+ * Canais e eventos de notificação.
+ *
+ * Os campos de credencial são opcionais e `''` limpa o canal — a UI precisa conseguir
+ * desconfigurar um webhook sem apagar o resto.
+ */
+export class UpdateNotificationSettingsDto {
+  slackWebhook?: string | null;
+  discordWebhook?: string | null;
+  telegramBotToken?: string | null;
+  telegramChatId?: string | null;
+  notifyDeployFailed?: boolean;
+  notifyDeploySuccess?: boolean;
+  notifyRollback?: boolean;
+  notifyAppDown?: boolean;
+  notifySslExpiring?: boolean;
 }
 
 export class UpdateGeneralSettingsDto {
@@ -78,3 +96,59 @@ apply(
   Transform(({ value }) => normalizeBoolean(value)) as PropDecorator,
   IsBoolean() as PropDecorator,
 );
+
+/** `''` significa "remover o canal"; qualquer outra coisa precisa ser uma URL https. */
+export function normalizeWebhook(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  return typeof value === 'string' ? value.trim() : value;
+}
+
+for (const campo of ['slackWebhook', 'discordWebhook'] as const) {
+  apply(
+    UpdateNotificationSettingsDto,
+    campo,
+    Transform(({ value }) => normalizeWebhook(value)) as PropDecorator,
+    IsOptional() as PropDecorator,
+    ValidateIf((o: any) => o[campo] !== null) as PropDecorator,
+    // Webhook de Slack e Discord são sempre https; aceitar http seria mandar um
+    // segredo em texto claro pela rede.
+    Matches(/^https:\/\/\S+$/, { message: `${campo} deve ser uma URL https` }) as PropDecorator,
+    MaxLength(2048) as PropDecorator,
+  );
+}
+
+apply(
+  UpdateNotificationSettingsDto,
+  'telegramBotToken',
+  Transform(({ value }) => normalizeWebhook(value)) as PropDecorator,
+  IsOptional() as PropDecorator,
+  ValidateIf((o: UpdateNotificationSettingsDto) => o.telegramBotToken !== null) as PropDecorator,
+  Matches(/^\d+:[A-Za-z0-9_-]+$/, { message: 'telegramBotToken deve ter o formato 123456:ABC-DEF' }) as PropDecorator,
+);
+
+apply(
+  UpdateNotificationSettingsDto,
+  'telegramChatId',
+  Transform(({ value }) => normalizeWebhook(value)) as PropDecorator,
+  IsOptional() as PropDecorator,
+  ValidateIf((o: UpdateNotificationSettingsDto) => o.telegramChatId !== null) as PropDecorator,
+  // Chat de grupo tem id negativo.
+  Matches(/^-?\d+$/, { message: 'telegramChatId deve ser numérico' }) as PropDecorator,
+);
+
+for (const campo of [
+  'notifyDeployFailed',
+  'notifyDeploySuccess',
+  'notifyRollback',
+  'notifyAppDown',
+  'notifySslExpiring',
+] as const) {
+  apply(
+    UpdateNotificationSettingsDto,
+    campo,
+    IsOptional() as PropDecorator,
+    Transform(({ value }) => normalizeBoolean(value)) as PropDecorator,
+    IsBoolean() as PropDecorator,
+  );
+}

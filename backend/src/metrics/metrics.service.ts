@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeployGateway } from '../deploy/deploy.gateway';
 import { EmailService } from '../email/email.service';
+import { NotificationService } from '../notifications/notification.service';
 import { run } from '../common/run';
 import { APP_PRESETS } from '../deploy/app-presets';
 import { appState, appStats } from '../deploy/docker';
@@ -20,6 +21,7 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
     private prisma: PrismaService,
     private deployGateway: DeployGateway,
     private emailService: EmailService,
+    private notifications: NotificationService,
   ) {}
 
   onModuleInit() {
@@ -72,9 +74,14 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
         if (previousStatus === 'online' && currentStatus !== 'online') {
           console.log(`[MetricsService] App ${app.name} stopped unexpectedly`);
           this.deployGateway.emitAppStopped(app.name, 'Process exited unexpectedly');
-          
-          // Send email notification for app stopped
-          this.emailService.notifyAppStopped(app.name, 'Process exited unexpectedly').catch(console.error);
+
+          this.notifications
+            .notify({
+              event: 'app-down',
+              subject: app.name,
+              detail: 'O processo saiu sem ter sido parado pelo painel.',
+            })
+            .catch(() => undefined);
           
           // Update app status in database
           await this.prisma.app.update({
@@ -134,7 +141,13 @@ export class MetricsService implements OnModuleInit, OnModuleDestroy {
     if (previousStatus === 'online' && currentStatus !== 'online') {
       console.log(`[MetricsService] Container ${app.name} stopped unexpectedly`);
       this.deployGateway.emitAppStopped(app.name, 'Container exited unexpectedly');
-      this.emailService.notifyAppStopped(app.name, 'Container exited unexpectedly').catch(console.error);
+      this.notifications
+        .notify({
+          event: 'app-down',
+          subject: app.name,
+          detail: `O container saiu sem ter sido parado pelo painel (${state.status}).`,
+        })
+        .catch(() => undefined);
       await this.prisma.app.update({ where: { id: app.id }, data: { status: 'stopped' } });
       await this.prisma.systemLog.create({
         data: {

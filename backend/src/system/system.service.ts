@@ -39,6 +39,58 @@ export class SystemService {
     };
   }
 
+  /**
+   * Configurações de notificação.
+   *
+   * As credenciais **não** são devolvidas: um webhook do Slack é um segredo — quem
+   * tiver a URL pode postar no canal — e o token do Telegram controla o bot inteiro.
+   * A UI recebe só um booleano dizendo se cada canal está configurado, o que é o
+   * suficiente para desenhar a tela.
+   */
+  async getNotificationSettings() {
+    const settings = await this.ensureSettings();
+    return {
+      slackConfigured: Boolean(settings.slackWebhook),
+      discordConfigured: Boolean(settings.discordWebhook),
+      telegramConfigured: Boolean(settings.telegramBotToken && settings.telegramChatId),
+      emailConfigured: Boolean(settings.emailEnabled && settings.emailRecipient),
+      notifyDeployFailed: settings.notifyDeployFailed,
+      notifyDeploySuccess: settings.notifyDeploySuccess,
+      notifyRollback: settings.notifyRollback,
+      notifyAppDown: settings.notifyAppDown,
+      notifySslExpiring: settings.notifySslExpiring,
+    };
+  }
+
+  async updateNotificationSettings(dto: Record<string, unknown>) {
+    const settings = await this.ensureSettings();
+
+    const data: Record<string, unknown> = {};
+    for (const campo of [
+      'slackWebhook',
+      'discordWebhook',
+      'telegramBotToken',
+      'telegramChatId',
+      'notifyDeployFailed',
+      'notifyDeploySuccess',
+      'notifyRollback',
+      'notifyAppDown',
+      'notifySslExpiring',
+    ]) {
+      if (dto[campo] !== undefined) data[campo] = dto[campo];
+    }
+
+    await this.prisma.systemSettings.update({ where: { id: settings.id }, data });
+    return this.getNotificationSettings();
+  }
+
+  /** Garante que a linha singleton de configurações existe. */
+  private async ensureSettings() {
+    const existente = await this.prisma.systemSettings.findFirst();
+    if (existente) return existente;
+    return this.prisma.systemSettings.create({ data: { emailEnabled: false, emailRecipient: null } });
+  }
+
   /** Remove todas as linhas de SystemLog. Não toca em deploys nem em métricas. */
   async clearSystemLogs(): Promise<{ removed: number }> {
     const { count } = await this.prisma.systemLog.deleteMany({});
