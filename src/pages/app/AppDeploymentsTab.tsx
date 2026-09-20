@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FileText, RotateCcw } from 'lucide-react';
+import { Eraser, FileText, RotateCcw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -7,7 +7,8 @@ import { EM_DASH, formatAbsolute, formatElapsed, formatRelative } from '@/lib/fo
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Callout, DataTable, EmptyState, TH, TableHead, TableRow, TableRowGroup, Tag } from '@/components/ds';
+import { Callout, DataTable, EmptyState, IconButton, TH, TableHead, TableRow, TableRowGroup, Tag } from '@/components/ds';
+import { ConfirmDeleteDialog } from '@/components/apps/ConfirmDeleteDialog';
 import { useApp } from './AppContext';
 
 /**
@@ -31,7 +32,7 @@ import { useApp } from './AppContext';
  * Oferecer rollback para uma release `failed` é oferecer uma ação que não pode dar
  * certo — o backend hoje aceita, e isso está na lista de correções pendentes.
  */
-const GRID = 'grid-cols-[96px_minmax(0,1fr)_132px_112px_88px_120px] max-xl:grid-cols-[96px_minmax(0,1fr)_112px_120px] max-md:grid-cols-[minmax(0,1fr)_92px]';
+const GRID = 'grid-cols-[96px_minmax(0,1fr)_132px_112px_88px_92px] max-xl:grid-cols-[96px_minmax(0,1fr)_112px_92px] max-md:grid-cols-[minmax(0,1fr)_92px]';
 
 export default function AppDeploymentsTab() {
   const { app, reload } = useApp();
@@ -40,6 +41,7 @@ export default function AppDeploymentsTab() {
   const [releases, setReleases] = useState<any[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
+  const [limpando, setLimpando] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
@@ -79,6 +81,41 @@ export default function AppDeploymentsTab() {
     }
   };
 
+  const apagar = async (release: any) => {
+    setOcupado(release.id);
+    try {
+      await api.deleteVersion(app.id, release.id);
+      toast.success(`Release ${release.version} removida do disco`);
+      await carregar();
+    } catch (e: any) {
+      toast.error(e?.message || 'Não foi possível remover a release');
+    } finally {
+      setOcupado(null);
+    }
+  };
+
+  const limparAntigas = async () => {
+    setLimpando(true);
+    try {
+      const { removed, failed } = await api.pruneVersions(app.id, 0);
+      if (failed.length) {
+        toast.warning(`${removed} removida(s); ${failed.length} falharam`);
+      } else {
+        toast.success(
+          removed === 0 ? 'Nada a remover — só existe a release atual' : `${removed} release(s) removida(s)`,
+        );
+      }
+      await carregar();
+    } catch (e: any) {
+      toast.error(e?.message || 'Não foi possível limpar as releases');
+    } finally {
+      setLimpando(false);
+    }
+  };
+
+  // Quantas dá para apagar: tudo que não é a release no ar.
+  const antigas = (releases ?? []).filter((r) => !(r.isCurrent || r.version === app.currentVersion)).length;
+
   if (releases === null) {
     return (
       <div className="flex flex-col gap-px">
@@ -93,11 +130,37 @@ export default function AppDeploymentsTab() {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Tag>{ehService ? `Escopo do projeto · ${app.project.name}` : 'Escopo do app'}</Tag>
-        <p className="m-0 text-xs leading-4 text-text-3">
+        <p className="m-0 min-w-0 flex-1 text-xs leading-4 text-text-3">
           {ehService
             ? 'Este app é um service de monorepo, então as releases são do projeto — e o rollback vale para todos os services dele.'
             : 'App avulso: estas releases são dele.'}
         </p>
+
+        {!ehService && antigas > 0 && (
+          <ConfirmDeleteDialog
+            name={app.name}
+            title={`Apagar ${antigas} release(s) antiga(s)?`}
+            description={
+              <>
+                <p>
+                  Os diretórios em <span className="font-mono">~/apps/{app.name}/releases</span> são
+                  apagados do disco. A release que está no ar é mantida.
+                </p>
+                <p>
+                  Depois disso não há para onde fazer rollback: o histórico fica só com a atual.
+                </p>
+              </>
+            }
+            confirmLabel={`Apagar ${antigas}`}
+            onConfirm={limparAntigas}
+            trigger={
+              <Button variant="secondary" size="xs" aria-busy={limpando ? 'true' : undefined}>
+                <Eraser aria-hidden />
+                Limpar antigas ({antigas})
+              </Button>
+            }
+          />
+        )}
       </div>
 
       {erro && <Callout tone="red" title="Não foi possível carregar as releases">{erro}</Callout>}
@@ -163,10 +226,9 @@ export default function AppDeploymentsTab() {
                   </span>
 
                   <span role="cell" className="flex items-center justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={`Log do deploy ${release.version}`}
+                    <IconButton
+                      label={`Ver o log do deploy ${release.version}`}
+                      icon={<FileText aria-hidden />}
                       onClick={async () => {
                         try {
                           const data = await api.getDeployLogs(release.id);
@@ -178,20 +240,48 @@ export default function AppDeploymentsTab() {
                           toast.error(e?.message || 'Erro ao carregar o log');
                         }
                       }}
-                    >
-                      <FileText aria-hidden />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
+                    />
+                    <IconButton
+                      label={motivo ? `Rollback indisponível — ${motivo}` : `Voltar para ${release.version}`}
+                      icon={<RotateCcw aria-hidden />}
                       disabled={Boolean(motivo)}
-                      title={motivo}
-                      aria-label={motivo ? `Rollback indisponível: ${motivo}` : `Rollback para ${release.version}`}
                       aria-busy={ocupado === release.id ? 'true' : undefined}
                       onClick={() => rollback(release)}
-                    >
-                      <RotateCcw aria-hidden />
-                    </Button>
+                    />
+                    {!ehService && (
+                      <ConfirmDeleteDialog
+                        name={release.version}
+                        title={`Apagar a release ${release.version}?`}
+                        description={
+                          <>
+                            <p>
+                              O diretório <span className="font-mono">{release.path || release.version}</span> é
+                              apagado do disco, e a linha sai do histórico.
+                            </p>
+                            <p>Depois disso não dá mais para fazer rollback para ela.</p>
+                          </>
+                        }
+                        confirmLabel="Apagar release"
+                        disabled={atual}
+                        onConfirm={() => apagar(release)}
+                        trigger={
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            disabled={atual}
+                            title={atual ? 'A release que está no ar não pode ser apagada' : undefined}
+                            aria-label={
+                              atual
+                                ? 'Apagar indisponível: esta release está no ar'
+                                : `Apagar a release ${release.version}`
+                            }
+                            className="text-text-3 hover:text-red"
+                          >
+                            <Trash2 aria-hidden />
+                          </Button>
+                        }
+                      />
+                    )}
                   </span>
                 </TableRow>
               );

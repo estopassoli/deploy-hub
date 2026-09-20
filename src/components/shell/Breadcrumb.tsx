@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
+import { useFleetOptional } from './FleetContext';
 import { ChevronRight } from 'lucide-react';
 
 /**
@@ -18,10 +19,19 @@ const SECOES: Record<string, string> = {
   buscar: 'Buscar',
   apps: 'Apps',
   projects: 'Projetos',
+  env: 'Ambiente',
+  git: 'Git e CI',
+  services: 'Services',
 };
 
 export function useCrumbs(serverName: string): { label: string; to?: string }[] {
   const { pathname } = useLocation();
+  // O segmento de projeto é um UUID. Sem resolver o nome, a trilha vira
+  // `local / Projetos / 999df316-7584-425a-9193-1c6d62287c84`, que não diz nada.
+  //
+  // Opcional de propósito: o AppShell chama este hook para o título da aba antes de
+  // montar o FleetProvider. Exigir o contexto aqui derruba a aplicação inteira.
+  const fleet = useFleetOptional();
   const partes = pathname.split('/').filter(Boolean);
   const crumbs: { label: string; to?: string }[] = [{ label: serverName, to: '/' }];
 
@@ -37,8 +47,11 @@ export function useCrumbs(serverName: string): { label: string; to?: string }[] 
   }
 
   if (partes[0] === 'projects' && partes[1]) {
+    const id = decodeURIComponent(partes[1]);
+    const projeto = fleet?.groups.find((g) => g.projectId === id);
     crumbs.push({ label: 'Projetos' });
-    crumbs.push({ label: decodeURIComponent(partes[1]) });
+    crumbs.push({ label: projeto?.name ?? id });
+    if (partes[2]) crumbs.push({ label: SECOES[partes[2]] ?? partes[2] });
     return crumbs;
   }
 

@@ -20,3 +20,4 @@ export * from './sparkline';
 export * from './status';
 export * from './stepper';
 export * from './tag';
+export * from './icon-button';

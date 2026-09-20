@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseCpuUsage, parseDiskUsage } from './system-parse.ts';
+import { cpuUsageFromProcStat,
+  parseCpuUsage, parseDiskUsage } from './system-parse.ts';
 
 test('parseDiskUsage lê a coluna de capacidade do df -P', () => {
   const saida = [
@@ -57,4 +58,49 @@ test('parseCpuUsage devolve null quando não reconhece a saída', () => {
   assert.equal(parseCpuUsage(''), null);
   assert.equal(parseCpuUsage('top: command not found'), null);
   assert.equal(parseCpuUsage('%Cpu(s): sem números aqui'), null);
+});
+
+// --- CPU ociosa reportada como 100% ------------------------------------------
+
+test('máquina ociosa não vira CPU 100%', () => {
+  // A linha real do `top` numa máquina sem carga: o `100.0 id` vem colado na vírgula
+  // do campo anterior. A regex antiga capturava ",100.0" e o painel anunciava 100%.
+  const linha = '%Cpu(s):  0.0 us,  0.0 sy,  0.0 ni,100.0 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st';
+  assert.equal(parseCpuUsage(linha), 0);
+});
+
+test('CPU com carga continua correta', () => {
+  assert.equal(parseCpuUsage('%Cpu(s):  0.6 us,  0.3 sy,  0.0 ni, 99.1 id,  0.0 wa'), 1);
+  assert.equal(parseCpuUsage('%Cpu(s): 25.0 us,  5.0 sy,  0.0 ni, 70.0 id'), 30);
+});
+
+test('locale com vírgula decimal', () => {
+  assert.equal(parseCpuUsage('%Cpu(s):  1,0 us,  0,5 sy,  0,0 ni, 94,9 id'), 5);
+});
+
+test('formato sem espaço antes de id', () => {
+  assert.equal(parseCpuUsage('%Cpu(s): 10.0 us, 5.0 sy, 0.0 ni,85.0%id'), 15);
+});
+
+test('cpuUsageFromProcStat mede a variação, não o acumulado', () => {
+  // 100 ticks decorridos, 75 deles ociosos -> 25% de uso.
+  const antes = 'cpu  1000 0 500 8000 100 0 0 0 0 0\ncpu0 1 2 3 4 5';
+  const depois = 'cpu  1010 0 515 8070 105 0 0 0 0 0\ncpu0 1 2 3 4 5';
+  assert.equal(cpuUsageFromProcStat(antes, depois), 25);
+});
+
+test('cpuUsageFromProcStat trata iowait como ocioso', () => {
+  const antes = 'cpu  100 0 100 800 0 0 0 0';
+  const depois = 'cpu  100 0 100 800 100 0 0 0';
+  // Só iowait cresceu: a CPU não fez trabalho nenhum.
+  assert.equal(cpuUsageFromProcStat(antes, depois), 0);
+});
+
+test('cpuUsageFromProcStat recusa amostras impossíveis', () => {
+  const amostra = 'cpu  100 0 100 800 0 0 0 0';
+  // Sem variação: nada a medir.
+  assert.equal(cpuUsageFromProcStat(amostra, amostra), null);
+  // Contador andou para trás (reboot entre as leituras).
+  assert.equal(cpuUsageFromProcStat('cpu  100 0 100 800 0', 'cpu  10 0 10 80 0'), null);
+  assert.equal(cpuUsageFromProcStat('sem cpu aqui', amostra), null);
 });

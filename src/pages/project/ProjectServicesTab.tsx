@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { EM_DASH, formatMB, formatPercent } from '@/lib/format';
 import { byProblemFirst, primaryAction, toStatus } from '@/lib/app-status';
 import { Button } from '@/components/ui/button';
-import { DataTable, EmptyState, StatusLabel, TH, TableHead, TableRow, TableRowGroup } from '@/components/ds';
+import { DataTable, EmptyState, IconButton, StatusLabel, TH, TableHead, TableRow, TableRowGroup } from '@/components/ds';
 import { AppRowActions } from '@/components/apps/AppRowActions';
 import { DeployLogPanel } from '@/components/projects/DeployLogPanel';
 import { AddServiceForm } from '@/components/projects/AddServiceForm';
@@ -121,18 +121,17 @@ export default function ProjectServicesTab() {
                           <ScrollText aria-hidden />
                         </Link>
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`${acao} de ${service.name}`}
+                      <IconButton
+                        label={`${acao} de ${service.name}`}
+                        icon={
+                          acao === 'Redeploy' ? <RefreshCw aria-hidden /> : acao === 'Start' ? <Play aria-hidden /> : <RotateCcw aria-hidden />
+                        }
                         aria-busy={ocupado === service.id ? 'true' : undefined}
                         onClick={() =>
                           executar(service, acao === 'Redeploy' ? 'redeploy' : acao === 'Start' ? 'start' : 'restart')
                         }
                         className="max-xl:hidden"
-                      >
-                        {acao === 'Redeploy' ? <RefreshCw aria-hidden /> : acao === 'Start' ? <Play aria-hidden /> : <RotateCcw aria-hidden />}
-                      </Button>
+                      />
                       <AppRowActions
                         app={{
                           id: service.id,

@@ -178,8 +178,23 @@ class ApiClient {
     return this.request<any>(`/apps/${appId}/rollback/${versionId}`, { method: 'POST' });
   }
 
+  /** Remove uma release do disco e do histórico. O servidor recusa a que está no ar. */
   async deleteVersion(appId: string, versionId: string) {
-    return this.request<any>(`/apps/${appId}/versions/${versionId}`, { method: 'DELETE' });
+    return this.request<{ removed: number; version: string }>(
+      `/apps/${appId}/versions/${versionId}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /**
+   * Limpeza em lote: mantém a release atual e as `keep` mais recentes depois dela.
+   * `keep: 0` deixa só a que está em produção.
+   */
+  async pruneVersions(appId: string, keep: number) {
+    return this.request<{ removed: number; failed: string[] }>(`/apps/${appId}/versions/prune`, {
+      method: 'POST',
+      body: JSON.stringify({ keep }),
+    });
   }
 
   // GitHub/Webhook

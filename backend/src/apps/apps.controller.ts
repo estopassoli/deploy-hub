@@ -71,6 +71,18 @@ export class AppsController {
     return this.appsService.getVersions(id);
   }
 
+  /** Remove uma release do disco e do histórico. Recusa a que está no ar. */
+  @Delete(':id/versions/:deployId')
+  async deleteVersion(@Param('id') id: string, @Param('deployId') deployId: string) {
+    return this.appsService.deleteVersion(id, deployId);
+  }
+
+  /** Limpeza em lote: mantém a atual e as `keep` mais recentes. */
+  @Post(':id/versions/prune')
+  async pruneVersions(@Param('id') id: string, @Body() body: { keep?: number }) {
+    return this.appsService.pruneVersions(id, body?.keep ?? 0);
+  }
+
   @Post(':id/rollback/:deployId')
   async rollback(@Param('id') id: string, @Param('deployId') deployId: string) {
     return this.appsService.rollback(id, deployId);

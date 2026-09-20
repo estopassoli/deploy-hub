@@ -1,0 +1,13 @@
+<!-- Mesma marca da tela de login e da sidebar: nó com três ramos sobre o tile emerald. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect width="32" height="32" rx="8" fill="#30A46C"/>
+  <g transform="translate(4 4) scale(1)" fill="none" stroke="#0A0A0B" stroke-width="2.4" stroke-linecap="round">
+    <line x1="12" y1="12.5" x2="12" y2="19.5"/>
+    <line x1="12" y1="12.5" x2="5.75" y2="8.5"/>
+    <line x1="12" y1="12.5" x2="18.25" y2="8.5"/>
+    <circle cx="12" cy="12.5" r="3" fill="#0A0A0B" stroke="none"/>
+    <circle cx="12" cy="20" r="2.5" fill="#0A0A0B" stroke="none"/>
+    <circle cx="5.25" cy="8.25" r="2.5" fill="#0A0A0B" stroke="none"/>
+    <circle cx="18.75" cy="8.25" r="2.5" fill="#0A0A0B" stroke="none"/>
+  </g>
+</svg>

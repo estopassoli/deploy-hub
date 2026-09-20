@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, CheckCheck, Trash2 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ds/icon-button';
 import { LevelTag, toLevel } from '@/components/ds/level-tag';
 import { EmptyState } from '@/components/ds/empty-state';
 import { PANEL_TZ_LABEL, formatAbsolute, formatRelative } from '@/lib/format';
@@ -61,24 +61,19 @@ export function NotificationsPopover({
             <span className="font-mono tabular-nums text-2xs text-text-3">{unreadCount} não lidas</span>
           )}
           <span className="flex-1" />
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Marcar todas como lidas"
+          <IconButton
+            label="Marcar todas como lidas"
+            icon={<CheckCheck />}
             disabled={unreadCount === 0}
             onClick={markAllAsRead}
-          >
-            <CheckCheck />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Limpar histórico"
+          />
+          <IconButton
+            label="Limpar o histórico de notificações"
+            icon={<Trash2 />}
             disabled={notifications.length === 0}
             onClick={clearAll}
-          >
-            <Trash2 />
-          </Button>
+            className="hover:text-red"
+          />
         </div>
 
         <div className="terminal-scroll max-h-[420px] overflow-auto p-2">

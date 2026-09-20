@@ -55,12 +55,59 @@ export function parseCpuUsage(topOutput: string): number | null {
   const line = topOutput.split('\n').find((l) => /cpu\(s\)/i.test(l));
   if (!line) return null;
 
-  // Aceita "94,9 id", "94.9 id" e "94.9%id".
-  const match = line.match(/([\d.,]+)\s*%?\s*id/i);
+  /*
+   * Aceita "94,9 id", "94.9 id" e "94.9%id".
+   *
+   * O número **não pode** começar com vírgula. A versão anterior usava `[\d.,]+`, que
+   * engolia o separador de campo do `top`: numa máquina ociosa a linha é
+   * `0.0 ni,100.0 id` — sem espaço depois da vírgula —, a captura virava ",100.0",
+   * `parseFloat(".100.0")` dava 0,1 e o painel anunciava **CPU 100%** justamente
+   * quando não havia carga nenhuma. Com carga, a linha é `ni, 99.1 id`, com espaço, e
+   * o bug não aparecia: por isso passava despercebido.
+   */
+  const match = line.match(/(?:^|[\s,])(\d+(?:[.,]\d+)?)\s*%?\s*id\b/i);
   if (!match) return null;
 
   const idle = parseFloat(match[1].replace(',', '.'));
   if (!Number.isFinite(idle) || idle < 0 || idle > 100) return null;
 
   return Math.round(100 - idle);
+}
+
+/**
+ * Uso de CPU a partir de duas leituras de `/proc/stat`.
+ *
+ * É a medição correta no Linux: a primeira linha do `/proc/stat` é **acumulada desde o
+ * boot**, então um valor absoluto não diz nada sobre agora. O que importa é a variação
+ * entre duas amostras — e é isso que `top -bn1` não entrega, porque com uma iteração só
+ * ele também reporta o acumulado.
+ *
+ * Devolve `null` quando as amostras não fazem sentido (relógio andou para trás,
+ * contadores reiniciados), para o chamador cair no fallback em vez de mostrar lixo.
+ */
+export function cpuUsageFromProcStat(antes: string, depois: string): number | null {
+  const a = parseProcStatCpu(antes);
+  const b = parseProcStatCpu(depois);
+  if (!a || !b) return null;
+
+  const totalDelta = b.total - a.total;
+  const idleDelta = b.idle - a.idle;
+  if (totalDelta <= 0 || idleDelta < 0 || idleDelta > totalDelta) return null;
+
+  return Math.round(100 - (idleDelta / totalDelta) * 100);
+}
+
+/** Primeira linha `cpu  ...` do /proc/stat, somada em total e ocioso. */
+function parseProcStatCpu(conteudo: string): { total: number; idle: number } | null {
+  const linha = conteudo.split('\n').find((l) => /^cpu\s/.test(l));
+  if (!linha) return null;
+
+  const campos = linha.trim().split(/\s+/).slice(1).map(Number);
+  if (campos.length < 5 || campos.some((n) => !Number.isFinite(n))) return null;
+
+  // user nice system idle iowait irq softirq steal guest guest_nice
+  const total = campos.reduce((acc, n) => acc + n, 0);
+  // `iowait` conta como ocioso: a CPU não estava fazendo trabalho.
+  const idle = campos[3] + (campos[4] ?? 0);
+  return { total, idle };
 }

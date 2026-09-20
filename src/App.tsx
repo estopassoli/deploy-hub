@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppShell } from "./components/shell/AppShell";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LegacyAppRedirect } from "./routes/LegacyAppRedirect";
 
 import Login from "./pages/Login";
@@ -53,12 +54,14 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/login" element={<Login />} />
+            <Route path="/login" element={<ErrorBoundary><Login /></ErrorBoundary>} />
 
             <Route
               element={
                 <ProtectedRoute>
-                  <AppShell />
+                  <ErrorBoundary>
+                    <AppShell />
+                  </ErrorBoundary>
                 </ProtectedRoute>
               }
             >

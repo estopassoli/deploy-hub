@@ -19,7 +19,6 @@ import {
   HealthCell,
   HealthStrip,
   Kbd,
-  Meter,
   MicroMeter,
   PageHeader,
   StatusDot,
@@ -31,6 +30,8 @@ import {
   TableRowGroup,
   aggregateStatus,
 } from '@/components/ds';
+import { IconButton } from '@/components/ds/icon-button';
+import { CRIT_AT, WARN_AT, meterTone } from '@/components/ds/meter';
 import { AppRowActions } from '@/components/apps/AppRowActions';
 import { useFleetContext } from '@/components/shell/FleetContext';
 import { useSystemStats } from '@/hooks/useSystemStats';
@@ -286,26 +287,20 @@ function Saude({
 
   return (
     <HealthStrip>
-      <HealthCell label="CPU">
-        {stats.data ? (
-          <Meter value={stats.data.cpuUsage} label="" hint="sem histórico" className="[&>div:first-child]:hidden" />
-        ) : (
-          <span className="font-mono tabular-nums text-sm text-text-3">{EM_DASH}</span>
-        )}
+      {/*
+        O rótulo vem do `HealthCell`, então o `Meter` entra sem rótulo próprio — mas
+        com o número visível. A versão anterior escondia a primeira linha do medidor
+        com `[&>div:first-child]:hidden` para sumir com o rótulo duplicado, e levava
+        junto o valor: a faixa mostrava três barras sem nenhuma porcentagem.
+      */}
+      <HealthCell label="CPU" hint={stats.stale ? 'sem atualizar · tentando' : 'sem histórico'}>
+        <MedidorSimples value={stats.data?.cpuUsage} />
       </HealthCell>
-      <HealthCell label="Memória">
-        {stats.data ? (
-          <Meter value={stats.data.memoryUsage} label="" className="[&>div:first-child]:hidden" />
-        ) : (
-          <span className="font-mono tabular-nums text-sm text-text-3">{EM_DASH}</span>
-        )}
+      <HealthCell label="Memória" hint={stats.stale ? 'sem atualizar · tentando' : undefined}>
+        <MedidorSimples value={stats.data?.memoryUsage} />
       </HealthCell>
-      <HealthCell label="Disco">
-        {stats.data ? (
-          <Meter value={stats.data.diskUsage} label="" className="[&>div:first-child]:hidden" />
-        ) : (
-          <span className="font-mono tabular-nums text-sm text-text-3">{EM_DASH}</span>
-        )}
+      <HealthCell label="Disco" hint={stats.stale ? 'sem atualizar · tentando' : undefined}>
+        <MedidorSimples value={stats.data?.diskUsage} />
       </HealthCell>
       <HealthCell
         label="Apps"
@@ -326,6 +321,38 @@ function Saude({
         </span>
       </HealthCell>
     </HealthStrip>
+  );
+}
+
+/**
+ * Número + barra, sem rótulo (quem rotula é a célula).
+ *
+ * Ausência é travessão e **sem barra**: um trilho vazio ao lado de um travessão sugere
+ * uma medição de zero, que é diferente de não ter medição.
+ */
+function MedidorSimples({ value }: { value?: number }) {
+  const tem = typeof value === 'number' && Number.isFinite(value);
+  if (!tem) return <span className="font-mono tabular-nums text-sm text-text-3">{EM_DASH}</span>;
+
+  const alto = value >= WARN_AT;
+  return (
+    <span className="flex flex-col gap-1.5">
+      <span className="flex items-baseline gap-1.5">
+        <span className="font-mono tabular-nums text-sm leading-5 text-text-1">{formatPercent(value, 0)}</span>
+        {alto && (
+          <span className={cn('text-xs font-medium', value >= CRIT_AT ? 'text-red' : 'text-amber')}>alto</span>
+        )}
+      </span>
+      <span
+        role="img"
+        aria-label={`${formatPercent(value, 0)}${alto ? ', alto' : ''} — alerta em ${WARN_AT}%, crítico em ${CRIT_AT}%`}
+        className="relative block h-1 overflow-hidden rounded-full bg-bg-3"
+      >
+        <span className={cn('block h-1 rounded-full', meterTone(value))} style={{ width: `${Math.min(100, value)}%` }} />
+        <span aria-hidden className="absolute inset-y-0 left-[70%] w-px bg-line-3" />
+        <span aria-hidden className="absolute inset-y-0 left-[90%] w-px bg-line-3" />
+      </span>
+    </span>
   );
 }
 
@@ -434,15 +461,14 @@ function Grupo({
                   Start {parados}
                 </Button>
               )}
-              <Button variant="ghost" size="icon-xs" aria-label={`Gerar SSL do projeto ${grupo.name}`} asChild>
+              <Button variant="ghost" size="icon-xs" aria-label={`Abrir o projeto ${grupo.name}`} asChild>
                 <Link to={`/projects/${grupo.projectId}`}>
                   <ShieldCheck aria-hidden />
                 </Link>
               </Button>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`Redeploy do projeto ${grupo.name}`}
+              <IconButton
+                label={`Redeploy do projeto ${grupo.name}`}
+                icon={<RefreshCw aria-hidden />}
                 onClick={async () => {
                   try {
                     await api.redeployProject(grupo.projectId!);
@@ -452,9 +478,7 @@ function Grupo({
                     toast.error(e?.message || 'Não foi possível redeployar');
                   }
                 }}
-              >
-                <RefreshCw aria-hidden />
-              </Button>
+              />
             </>
           ) : undefined
         }
@@ -577,25 +601,23 @@ function Linha({
       </span>
 
       <span role="cell" className="flex items-center justify-end gap-1">
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`Logs de ${app.name} (L)`}
+        <IconButton
+          label={`Logs de ${app.name}`}
+          shortcut="L"
+          icon={<ScrollText aria-hidden />}
           onClick={() => navigate(`${rota}/logs`)}
           className="max-xl:hidden"
-        >
-          <ScrollText aria-hidden />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`${acao} de ${app.name}`}
+        />
+        <IconButton
+          label={`${acao} de ${app.name}`}
+          shortcut={acao === 'Redeploy' ? 'R' : acao === 'Start' ? 'S' : '⇧R'}
+          icon={
+            acao === 'Redeploy' ? <RefreshCw aria-hidden /> : acao === 'Start' ? <Play aria-hidden /> : <RotateCcw aria-hidden />
+          }
           aria-busy={busy ? 'true' : undefined}
           onClick={() => onLifecycle(app, acao === 'Redeploy' ? 'redeploy' : acao === 'Start' ? 'start' : 'restart')}
           className="max-xl:hidden"
-        >
-          {acao === 'Redeploy' ? <RefreshCw aria-hidden /> : acao === 'Start' ? <Play aria-hidden /> : <RotateCcw aria-hidden />}
-        </Button>
+        />
         <AppRowActions
           app={app}
           busy={busy}

@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { formatTime, stripAnsi } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DayRule, EmptyState, LOG_GRID, LogFooter, LogViewer, StatusDot, toLevel } from '@/components/ds';
+import { DayRule, EmptyState, IconButton, LOG_GRID, LogFooter, LogViewer, StatusDot, toLevel } from '@/components/ds';
 import { LevelTag } from '@/components/ds/level-tag';
 import { useApp } from './AppContext';
 
@@ -53,23 +53,18 @@ export default function AppLogsTab() {
             </span>
           </span>
           <span className="flex-1" />
-          <Button
-            variant="ghost"
-            size="icon-xs"
+          <IconButton
+            label="Quebrar linhas longas"
+            shortcut="W"
+            icon={<WrapText aria-hidden />}
             aria-pressed={quebrar}
-            aria-label="Quebrar linhas (W)"
             onClick={() => setQuebrar((v) => !v)}
             className={cn(quebrar && 'bg-bg-3 text-text-1')}
-          >
-            <WrapText aria-hidden />
-          </Button>
-          <Button variant="ghost" size="icon-xs" aria-label="Atualizar" onClick={carregar}>
-            <RefreshCw aria-hidden />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Baixar log"
+          />
+          <IconButton label="Recarregar os logs" icon={<RefreshCw aria-hidden />} onClick={carregar} />
+          <IconButton
+            label="Baixar o log como arquivo"
+            icon={<Download aria-hidden />}
             onClick={() => {
               const texto = (linhas ?? []).map((l) => stripAnsi(l.message)).join('\n');
               const url = URL.createObjectURL(new Blob([texto], { type: 'text/plain' }));
@@ -79,9 +74,7 @@ export default function AppLogsTab() {
               a.click();
               URL.revokeObjectURL(url);
             }}
-          >
-            <Download aria-hidden />
-          </Button>
+          />
         </>
       }
       footer={<LogFooter summary={`${linhas?.length ?? 0} linhas`} keys={false} />}

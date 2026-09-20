@@ -67,11 +67,35 @@ export interface ButtonProps
   asChild?: boolean;
 }
 
+/** Tamanhos em que o botão não tem rótulo visível. */
+const SO_ICONE = new Set(["icon-xs", "icon", "icon-touch"]);
+
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, withKbd, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
+
+    /*
+     * Botão só de ícone recebe `title` a partir do `aria-label`.
+     *
+     * O `aria-label` já era obrigatório e já nomeia o alvo e a tecla ("Logs de aura
+     * (L)"), mas ele só existe para o leitor de tela: quem enxerga ficava adivinhando
+     * o que cada ícone de 28px faz. Derivar o title do label garante que os dois nunca
+     * divirjam, e funciona mesmo quando o botão é gatilho de um menu ou diálogo do
+     * Radix — onde embrulhar num Tooltip quebraria a cadeia de refs.
+     *
+     * Um `title` explícito (inclusive `""`, usado por `ds/IconButton` para ceder a vez
+     * ao tooltip estilizado) tem precedência.
+     */
+    const rotulo = typeof props["aria-label"] === "string" ? props["aria-label"] : undefined;
+    const title = props.title !== undefined ? props.title : SO_ICONE.has(size ?? "") ? rotulo : undefined;
+
     return (
-      <Comp ref={ref} className={cn(buttonVariants({ variant, size, withKbd, className }))} {...props} />
+      <Comp
+        ref={ref}
+        className={cn(buttonVariants({ variant, size, withKbd, className }))}
+        {...props}
+        title={title}
+      />
     );
   },
 );

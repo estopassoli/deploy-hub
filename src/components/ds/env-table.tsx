@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Copy, Eye, EyeOff, FileInput, Lock, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { IconButton } from './icon-button';
 import { cn } from '@/lib/utils';
 import { TH } from './data-table';
 import { Tag } from './tag';
@@ -118,28 +119,25 @@ export function EnvTable({
               <span className="text-xs leading-[18px] text-text-2 max-md:hidden">{row.origin ?? 'App'}</span>
             )}
             <span className="flex items-center justify-end gap-1 max-md:row-span-2 max-md:row-start-1">
-              <Button
-                variant="ghost"
-                size="icon-xs"
+              <IconButton
+                label={`${aberta ? 'Ocultar' : 'Revelar'} o valor de ${row.key}`}
+                icon={aberta ? <EyeOff /> : <Eye />}
                 onClick={() => toggle(row.key)}
-                aria-label={`${aberta ? 'Ocultar' : 'Revelar'} ${row.key}`}
-              >
-                {aberta ? <EyeOff /> : <Eye />}
-              </Button>
+              />
               {variant === 'full' && onCopy && (
-                <Button variant="ghost" size="icon-xs" onClick={() => onCopy(row)} aria-label={`Copiar ${row.key}`}>
-                  <Copy />
-                </Button>
+                <IconButton
+                  label={`Copiar ${row.key} (sem revelar na tela)`}
+                  icon={<Copy />}
+                  onClick={() => onCopy(row)}
+                />
               )}
               {onRemove && !row.inherited && (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
+                <IconButton
+                  label={`Remover ${row.key}`}
+                  icon={<Trash2 />}
                   onClick={() => onRemove(row.key)}
-                  aria-label={`Remover ${row.key}`}
-                >
-                  <Trash2 />
-                </Button>
+                  className="hover:text-red"
+                />
               )}
             </span>
           </div>

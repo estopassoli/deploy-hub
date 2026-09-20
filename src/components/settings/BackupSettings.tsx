@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { ConfirmDeleteDialog } from '@/components/apps/ConfirmDeleteDialog';
+import { Callout } from '@/components/ds/callout';
 import api from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { toast } from 'sonner';
@@ -34,6 +35,14 @@ export function BackupSettings() {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
+  /**
+   * Falhas do último backup, uma por alvo.
+   *
+   * Ficavam concatenadas num único toast: com 15 apps sem Postgres acessível, a
+   * mensagem virava uma parede de texto que cobria metade da tela e sumia sozinha.
+   * Falha de backup é condição persistente — pertence a um Callout, não a um toast.
+   */
+  const [falhas, setFalhas] = useState<Array<{ target: string; error?: string }>>([]);
 
   const load = useCallback(async () => {
     try {
@@ -69,14 +78,16 @@ export function BackupSettings() {
     const aviso = toast.loading('Gerando backup...');
     try {
       const { results } = await api.runBackupNow();
-      const falhas = results.filter((r) => !r.ok);
-      if (falhas.length === 0) {
+      const semSucesso = results.filter((r) => !r.ok);
+      setFalhas(semSucesso);
+
+      if (semSucesso.length === 0) {
         toast.success(`${results.length} backup(s) gerado(s)`, { id: aviso });
       } else {
-        toast.warning(
-          `${results.length - falhas.length}/${results.length} OK · falhou: ${falhas.map((f) => `${f.target} (${f.error})`).join(', ')}`,
-          { id: aviso, duration: 12000 },
-        );
+        // O toast diz o placar; o detalhe fica na tela, onde dá para ler.
+        toast.warning(`${results.length - semSucesso.length} de ${results.length} backups OK`, {
+          id: aviso,
+        });
       }
       await load();
     } catch (error: any) {
@@ -165,6 +176,29 @@ export function BackupSettings() {
           Salvar backup
         </Button>
       </div>
+
+      {falhas.length > 0 && (
+        <Callout
+          tone="amber"
+          title={`${falhas.length} ${falhas.length === 1 ? 'backup falhou' : 'backups falharam'}`}
+          action={
+            <Button variant="ghost" size="xs" onClick={() => setFalhas([])}>
+              Dispensar
+            </Button>
+          }
+        >
+          <ul className="m-0 flex max-h-40 list-none flex-col gap-1 overflow-auto p-0 pt-1">
+            {falhas.map((f) => (
+              <li key={f.target} className="flex min-w-0 flex-col">
+                <span className="font-mono tabular-nums text-2xs text-text-1">{f.target}</span>
+                <span className="truncate font-mono tabular-nums text-2xs text-text-3" title={f.error}>
+                  {f.error}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Callout>
+      )}
 
       <Separator />
 

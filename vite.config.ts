@@ -15,17 +15,29 @@ export default defineConfig(({ mode }) => ({
     mode === "development" && componentTagger(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["logo.png", "robots.txt"],
+      includeAssets: ["favicon.svg", "logo.png", "robots.txt"],
       manifest: {
         name: "DeployHub - DevOps Panel",
         short_name: "DeployHub",
         description: "Painel de gerenciamento de deploys para apps Node.js",
-        theme_color: "#0d1117",
-        background_color: "#0d1117",
+        theme_color: "#0A0A0B",
+        background_color: "#0A0A0B",
         display: "standalone",
         orientation: "portrait",
         start_url: "/",
         icons: [
+          // SVG escala para qualquer tamanho; o PNG fica de fallback para quem não o suporta.
+          {
+            src: "/favicon.svg",
+            sizes: "any",
+            type: "image/svg+xml",
+          },
+          {
+            src: "/favicon.svg",
+            sizes: "any",
+            type: "image/svg+xml",
+            purpose: "maskable",
+          },
           {
             src: "/logo.png",
             sizes: "192x192",
@@ -35,12 +47,6 @@ export default defineConfig(({ mode }) => ({
             src: "/logo.png",
             sizes: "512x512",
             type: "image/png",
-          },
-          {
-            src: "/logo.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "maskable",
           },
         ],
       },

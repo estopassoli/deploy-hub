@@ -6,6 +6,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogBody,
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
@@ -110,13 +111,13 @@ export function ConfirmDeleteDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{title ?? `Excluir ${name}?`}</AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div className="space-y-2 text-sm text-muted-foreground">{description}</div>
+            <div className="flex flex-col gap-2 text-[13px] leading-5 text-text-2">{description}</div>
           </AlertDialogDescription>
         </AlertDialogHeader>
 
-        <div className="space-y-2">
-          <Label htmlFor="confirm-name" className="text-sm">
-            Digite <span className="font-mono text-foreground">{name}</span> para confirmar
+        <AlertDialogBody className="flex flex-col gap-1.5">
+          <Label htmlFor="confirm-name">
+            Digite <span className="font-mono text-text-1">{name}</span> para confirmar
           </Label>
           <Input
             id="confirm-name"
@@ -127,14 +128,16 @@ export function ConfirmDeleteDialog({
             }}
             placeholder={name}
             autoComplete="off"
-            className="font-mono"
+            className="font-mono tabular-nums text-[12.5px]"
           />
-        </div>
+        </AlertDialogBody>
 
         <AlertDialogFooter>
           <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          {/* Sólido só aqui: é o único lugar do produto onde vermelho preenchido
+              não fica a um clique acidental de distância. */}
           <Button
-            variant="destructive"
+            variant="destructive-solid"
             disabled={!matches || working}
             onClick={handleConfirm}
           >

@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as os from 'os';
 import { run } from '../common/run';
-import { parseCpuUsage, parseDiskUsage } from './system-parse';
+import * as fs from 'fs/promises';
+import { cpuUsageFromProcStat, parseCpuUsage, parseDiskUsage } from './system-parse';
 
 interface UpdateEmailSettingsDto {
   emailEnabled: boolean;
@@ -142,10 +143,33 @@ export class SystemService {
     };
   }
 
+  /**
+   * Uso de CPU **agora**, não desde o boot.
+   *
+   * Três fontes, em ordem de confiabilidade:
+   *
+   * 1. **Duas leituras de `/proc/stat` com 200ms de intervalo.** É a medição correta no
+   *    Linux: a linha `cpu` é acumulada desde o boot, então só a variação entre duas
+   *    amostras diz o que está acontecendo agora.
+   * 2. `top -bn1`, que com uma iteração só também reporta acumulado — serve de
+   *    aproximação onde não há `/proc`.
+   * 3. `os.cpus()`, que é acumulado desde o boot e por isso é o último recurso.
+   *
+   * O intervalo de 200ms é curto o bastante para não atrasar a resposta e longo o
+   * bastante para os contadores do kernel andarem (eles têm granularidade de 10ms).
+   */
   private async getCpuUsage(): Promise<number> {
-    // Era `top -bn1 | grep 'Cpu(s)' | awk '{print $2}'`. Sem o pipeline de shell, e
-    // lendo o idle em vez da coluna 2 — que muda de posição conforme o locale e a
-    // versão do procps, e por isso às vezes devolvia o número errado.
+    try {
+      const antes = await fs.readFile('/proc/stat', 'utf8');
+      await new Promise((r) => setTimeout(r, 200));
+      const depois = await fs.readFile('/proc/stat', 'utf8');
+
+      const uso = cpuUsageFromProcStat(antes, depois);
+      if (uso !== null) return uso;
+    } catch {
+      /* sem /proc: cai para o top */
+    }
+
     try {
       const { stdout } = await run('top', ['-bn1'], { timeout: 10_000 });
       const usage = parseCpuUsage(stdout);
@@ -156,11 +180,12 @@ export class SystemService {
 
     const cpus = os.cpus();
     const totalIdle = cpus.reduce((acc, cpu) => acc + cpu.times.idle, 0);
-    const totalTick = cpus.reduce((acc, cpu) =>
-      acc + cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle + cpu.times.irq, 0
+    const totalTick = cpus.reduce(
+      (acc, cpu) => acc + cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle + cpu.times.irq,
+      0,
     );
     if (!totalTick) return 0;
-    return Math.round(100 - (totalIdle / totalTick * 100));
+    return Math.round(100 - (totalIdle / totalTick) * 100);
   }
 
   private getMemoryUsage(): number {

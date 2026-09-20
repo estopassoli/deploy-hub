@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -8,6 +8,7 @@ import { run, runShell, sudo } from '../common/run';
 import { isStaticPreset } from '../deploy/app-presets';
 import { dockerLimitFlags } from '../deploy/resource-limits';
 import { proxyVhostConfig, staticVhostConfig } from '../deploy/nginx-config';
+import { canDeleteRelease, selectPrunable, type DeletableRelease } from './release-deletion';
 import {
   appState,
   appStats,
@@ -465,6 +466,113 @@ export class AppsService {
     // divergência do "Invalid Date" no card de atividade recente. Normalizado aqui, na
     // API, mantendo `version` para quem já usa.
     return deploys.map((deploy) => ({ ...deploy, timestamp: deploy.version }));
+  }
+
+  /**
+   * Para onde o symlink `current` do app aponta agora.
+   *
+   * Lido do disco, não do banco: `isCurrent` já se provou capaz de divergir, e aqui a
+   * consequência de confiar no valor errado é apagar a release que está servindo.
+   * Devolve `null` quando não dá para ler — aí vale só o que o banco diz.
+   */
+  private readCurrentTarget(appName: string): string | null {
+    try {
+      const link = path.join(APPS_DIR, appName, 'current');
+      if (!fs.existsSync(link)) return null;
+      return fs.realpathSync(link);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Apaga o diretório da release, com a mesma guarda do job de limpeza. */
+  private async removeReleaseDir(release: DeletableRelease): Promise<void> {
+    if (!release.path || !fs.existsSync(release.path)) return;
+    // `path` vem do banco e isto é um `rm -rf` como root: o assertInside recusa
+    // qualquer caminho fora de APPS_DIR, inclusive o próprio APPS_DIR.
+    const dir = assertInside(release.path, [APPS_DIR], 'diretório da release');
+    await run('rm', ['-rf', dir]);
+  }
+
+  /**
+   * Remove uma release: diretório em disco e a linha do histórico.
+   *
+   * Este endpoint não existia — `api.deleteVersion` no front sempre respondia 404,
+   * então o botão de excluir release nunca funcionou.
+   */
+  async deleteVersion(appId: string, deployId: string) {
+    const app = await this.prisma.app.findUnique({ where: { id: appId } });
+    if (!app) throw new NotFoundException('App não encontrado');
+
+    const deploy = await this.prisma.deploy.findUnique({ where: { id: deployId } });
+    if (!deploy || deploy.appId !== appId) throw new NotFoundException('Release não encontrada');
+
+    const veredito = canDeleteRelease(deploy as DeletableRelease, this.readCurrentTarget(app.name));
+    if (!veredito.allowed) throw new BadRequestException(veredito.reason);
+
+    await this.removeReleaseDir(deploy as DeletableRelease);
+    await this.prisma.deploy.delete({ where: { id: deploy.id } });
+
+    await this.prisma.systemLog.create({
+      data: {
+        level: 'info',
+        message: `Release removida manualmente: ${app.name}/${deploy.version}`,
+        source: 'cleanup',
+        appId: app.id,
+      },
+    });
+
+    return { removed: 1, version: deploy.version };
+  }
+
+  /**
+   * Limpeza em lote: apaga as releases antigas e mantém as `keep` mais recentes.
+   *
+   * A release atual nunca entra na conta de `keep` — ela é mantida por obrigação, não
+   * por escolha. `keep: 0` significa "só a atual".
+   */
+  async pruneVersions(appId: string, keep: number) {
+    const app = await this.prisma.app.findUnique({ where: { id: appId } });
+    if (!app) throw new NotFoundException('App não encontrado');
+
+    if (!Number.isInteger(keep) || keep < 0 || keep > 100) {
+      throw new BadRequestException('keep deve ser um inteiro entre 0 e 100');
+    }
+
+    const releases = (await this.prisma.deploy.findMany({
+      where: { appId },
+      orderBy: { createdAt: 'desc' },
+    })) as unknown as DeletableRelease[];
+
+    const { toDelete } = selectPrunable(releases, { keep, currentTarget: this.readCurrentTarget(app.name) });
+
+    const falhas: string[] = [];
+    let removidas = 0;
+
+    for (const release of toDelete) {
+      try {
+        await this.removeReleaseDir(release);
+        await this.prisma.deploy.delete({ where: { id: release.id } });
+        removidas++;
+      } catch (error: any) {
+        // Uma release que não apaga não pode abortar o lote: as outras seguem.
+        falhas.push(`${release.version}: ${error.message}`);
+      }
+    }
+
+    await this.prisma.systemLog.create({
+      data: {
+        level: falhas.length ? 'warn' : 'info',
+        message:
+          `Limpeza manual de releases em ${app.name}: ${removidas} removida(s), mantendo a atual` +
+          (keep > 0 ? ` e as ${keep} mais recentes` : '') +
+          (falhas.length ? ` · falhas: ${falhas.join('; ')}` : ''),
+        source: 'cleanup',
+        appId: app.id,
+      },
+    });
+
+    return { removed: removidas, failed: falhas };
   }
 
   async rollback(id: string, deployId: string) {
