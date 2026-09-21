@@ -108,6 +108,12 @@ export class ProjectsController {
     return this.projects.redeploy(id);
   }
 
+  /** Apaga as releases selecionadas do projeto. Recusa a que está no ar, com motivo. */
+  @Post(':id/deploys/delete')
+  async deleteDeploys(@Param('id') id: string, @Body() body: { ids?: string[] }) {
+    return this.projects.deleteDeploys(id, body?.ids ?? []);
+  }
+
   @Post(':id/rollback/:deployId')
   rollback(@Param('id') id: string, @Param('deployId') deployId: string) {
     return this.projects.rollback(id, deployId);

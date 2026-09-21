@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Eraser, FileText, RotateCcw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
@@ -7,7 +7,8 @@ import { EM_DASH, formatAbsolute, formatElapsed, formatRelative } from '@/lib/fo
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Callout, DataTable, EmptyState, IconButton, TH, TableHead, TableRow, TableRowGroup, Tag } from '@/components/ds';
+import { Callout, DataTable, EmptyState, IconButton, SelectionBar, TH, TableHead, TableRow, TableRowGroup, Tag } from '@/components/ds';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ConfirmDeleteDialog } from '@/components/apps/ConfirmDeleteDialog';
 import { useApp } from './AppContext';
 
@@ -32,7 +33,10 @@ import { useApp } from './AppContext';
  * Oferecer rollback para uma release `failed` é oferecer uma ação que não pode dar
  * certo — o backend hoje aceita, e isso está na lista de correções pendentes.
  */
-const GRID = 'grid-cols-[96px_minmax(0,1fr)_132px_112px_88px_92px] max-xl:grid-cols-[96px_minmax(0,1fr)_112px_92px] max-md:grid-cols-[minmax(0,1fr)_92px]';
+const GRID =
+  'grid-cols-[32px_96px_minmax(0,1fr)_132px_112px_88px_92px] ' +
+  'max-xl:grid-cols-[44px_96px_minmax(0,1fr)_112px_92px] ' +
+  'max-md:grid-cols-[32px_minmax(0,1fr)_92px]';
 
 export default function AppDeploymentsTab() {
   const { app, reload } = useApp();
@@ -42,6 +46,8 @@ export default function AppDeploymentsTab() {
   const [erro, setErro] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [limpando, setLimpando] = useState(false);
+  const [marcadas, setMarcadas] = useState<Set<string>>(new Set());
+  const [apagando, setApagando] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
@@ -78,6 +84,49 @@ export default function AppDeploymentsTab() {
       toast.error(e?.message || 'Não foi possível fazer rollback');
     } finally {
       setOcupado(null);
+    }
+  };
+
+  /**
+   * Só releases fora do ar podem ser marcadas — a atual nem ganha caixa.
+   *
+   * Num service de monorepo a exclusão é do projeto inteiro, então a seleção fica
+   * desligada aqui: apagar dali afetaria releases compartilhadas com os outros
+   * services, e o lugar certo para isso é a aba Deployments do projeto.
+   */
+  const elegiveis = useMemo(
+    () => (releases ?? []).filter((r) => !(r.isCurrent || r.version === app.currentVersion)),
+    [releases, app.currentVersion],
+  );
+  const todasMarcadas = elegiveis.length > 0 && marcadas.size === elegiveis.length;
+  const podeSelecionar = !ehService;
+
+  const alternar = (id: string) =>
+    setMarcadas((atual) => {
+      const proximo = new Set(atual);
+      if (proximo.has(id)) proximo.delete(id);
+      else proximo.add(id);
+      return proximo;
+    });
+
+  const apagarSelecionadas = async () => {
+    setApagando(true);
+    try {
+      const { removed, failed } = await api.deleteVersions(app.id, [...marcadas]);
+      if (failed.length) {
+        toast.warning(`${removed} removida(s) · ${failed.length} recusada(s)`, {
+          description: failed.slice(0, 3).join(' · '),
+          duration: 12000,
+        });
+      } else {
+        toast.success(`${removed} release(s) removida(s) do disco`);
+      }
+      setMarcadas(new Set());
+      await Promise.all([carregar(), reload()]);
+    } catch (e: any) {
+      toast.error(e?.message || 'Não foi possível apagar as releases');
+    } finally {
+      setApagando(false);
     }
   };
 
@@ -165,6 +214,32 @@ export default function AppDeploymentsTab() {
 
       {erro && <Callout tone="red" title="Não foi possível carregar as releases">{erro}</Callout>}
 
+      {podeSelecionar && (
+        <SelectionBar count={marcadas.size} onClear={() => setMarcadas(new Set())}>
+          <ConfirmDeleteDialog
+            name={app.name}
+            title={`Apagar ${marcadas.size} release(s)?`}
+            description={
+              <>
+                <p>
+                  Os diretórios em <span className="font-mono">~/apps/{app.name}/releases</span> são
+                  removidos do disco. A release que está no ar não é tocada.
+                </p>
+                <p>Depois disso não dá mais para fazer rollback para nenhuma delas.</p>
+              </>
+            }
+            confirmLabel={`Apagar ${marcadas.size}`}
+            onConfirm={apagarSelecionadas}
+            trigger={
+              <Button variant="destructive" size="xs" aria-busy={apagando ? 'true' : undefined}>
+                <Trash2 aria-hidden />
+                Apagar selecionadas
+              </Button>
+            }
+          />
+        </SelectionBar>
+      )}
+
       {releases.length === 0 ? (
         <EmptyState
           title="Nenhum deploy ainda"
@@ -173,6 +248,18 @@ export default function AppDeploymentsTab() {
       ) : (
         <DataTable label={`Releases de ${app.name}`}>
           <TableHead grid={GRID}>
+            <span role="columnheader" className="flex items-center">
+              {podeSelecionar && (
+                <Checkbox
+                  checked={todasMarcadas ? true : marcadas.size > 0 ? 'indeterminate' : false}
+                  disabled={elegiveis.length === 0}
+                  aria-label={todasMarcadas ? 'Desmarcar todas' : 'Marcar todas as releases apagáveis'}
+                  onCheckedChange={() =>
+                    setMarcadas(todasMarcadas ? new Set() : new Set(elegiveis.map((r) => r.id)))
+                  }
+                />
+              )}
+            </span>
             <span role="columnheader" className={TH}>Status</span>
             <span role="columnheader" className={TH}>Commit</span>
             <span role="columnheader" className={cn(TH, 'max-xl:hidden')}>Release</span>
@@ -192,7 +279,24 @@ export default function AppDeploymentsTab() {
                   : undefined;
 
               return (
-                <TableRow key={release.id} grid={GRID} selected={atual}>
+                <TableRow key={release.id} grid={GRID} selected={atual || marcadas.has(release.id)}>
+                  <span role="cell" className="flex items-center">
+                    {!podeSelecionar ? null : atual ? (
+                      <span
+                        className="text-2xs text-text-3"
+                        title="A release que está no ar não pode ser apagada"
+                        aria-label="Esta release está no ar e não pode ser apagada"
+                      >
+                        —
+                      </span>
+                    ) : (
+                      <Checkbox
+                        checked={marcadas.has(release.id)}
+                        aria-label={`Selecionar a release ${release.version}`}
+                        onCheckedChange={() => alternar(release.id)}
+                      />
+                    )}
+                  </span>
                   <span role="cell">
                     <Badge tone={sucesso ? 'accent' : release.status === 'failed' ? 'red' : 'amber'}>
                       {sucesso ? 'Ready' : release.status === 'failed' ? 'Failed' : release.status}

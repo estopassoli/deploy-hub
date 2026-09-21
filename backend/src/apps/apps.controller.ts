@@ -77,6 +77,12 @@ export class AppsController {
     return this.appsService.deleteVersion(id, deployId);
   }
 
+  /** Apaga as releases selecionadas. Recusa, com motivo, a que está no ar. */
+  @Post(':id/versions/delete')
+  async deleteVersions(@Param('id') id: string, @Body() body: { ids?: string[] }) {
+    return this.appsService.deleteVersions(id, body?.ids ?? []);
+  }
+
   /** Limpeza em lote: mantém a atual e as `keep` mais recentes. */
   @Post(':id/versions/prune')
   async pruneVersions(@Param('id') id: string, @Body() body: { keep?: number }) {

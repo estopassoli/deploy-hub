@@ -8,7 +8,7 @@ import { run, runShell, sudo } from '../common/run';
 import { isStaticPreset } from '../deploy/app-presets';
 import { dockerLimitFlags } from '../deploy/resource-limits';
 import { proxyVhostConfig, staticVhostConfig } from '../deploy/nginx-config';
-import { canDeleteRelease, selectPrunable, type DeletableRelease } from './release-deletion';
+import { canDeleteRelease, selectDeletable, selectPrunable, type DeletableRelease } from './release-deletion';
 import {
   appState,
   appStats,
@@ -523,6 +523,50 @@ export class AppsService {
     });
 
     return { removed: 1, version: deploy.version };
+  }
+
+  /**
+   * Apaga as releases escolhidas na tela.
+   *
+   * Devolve o que foi recusado **com o motivo**: apagar 9 de 10 em silêncio, deixando
+   * a décima sem explicação, é pior do que recusar tudo.
+   */
+  async deleteVersions(appId: string, ids: string[]) {
+    const app = await this.prisma.app.findUnique({ where: { id: appId } });
+    if (!app) throw new NotFoundException('App não encontrado');
+    if (!Array.isArray(ids) || ids.length === 0) throw new BadRequestException('Nenhuma release selecionada');
+
+    const releases = (await this.prisma.deploy.findMany({
+      where: { appId },
+    })) as unknown as DeletableRelease[];
+
+    const { toDelete, refused } = selectDeletable(releases, ids, [this.readCurrentTarget(app.name)]);
+
+    let removidas = 0;
+    const falhas = refused.map((r) => `${r.release.version}: ${r.reason}`);
+
+    for (const release of toDelete) {
+      try {
+        await this.removeReleaseDir(release);
+        await this.prisma.deploy.delete({ where: { id: release.id } });
+        removidas++;
+      } catch (error: any) {
+        falhas.push(`${release.version}: ${error.message}`);
+      }
+    }
+
+    await this.prisma.systemLog.create({
+      data: {
+        level: falhas.length ? 'warn' : 'info',
+        message:
+          `${removidas} release(s) removida(s) de ${app.name}` +
+          (falhas.length ? ` · ${falhas.length} recusada(s)` : ''),
+        source: 'cleanup',
+        appId: app.id,
+      },
+    });
+
+    return { removed: removidas, failed: falhas };
   }
 
   /**

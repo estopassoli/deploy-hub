@@ -21,3 +21,4 @@ export * from './status';
 export * from './stepper';
 export * from './tag';
 export * from './icon-button';
+export * from './selection-bar';

@@ -35,6 +35,7 @@ export default function ProjectEnvTab() {
 
       <EnvTable
         rows={rows}
+        fileName={`${project.name}.env`}
         onAdd={() => {
           const chave = window.prompt('Nome da variável')?.trim().toUpperCase();
           if (!chave) return;

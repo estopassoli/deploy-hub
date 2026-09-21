@@ -194,6 +194,22 @@ class ApiClient {
     );
   }
 
+  /** Apaga as releases selecionadas. O servidor recusa, com motivo, a que está no ar. */
+  async deleteVersions(appId: string, ids: string[]) {
+    return this.request<{ removed: number; failed: string[] }>(`/apps/${appId}/versions/delete`, {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+  }
+
+  /** Mesma coisa para releases de um projeto monorepo. */
+  async deleteProjectDeploys(projectId: string, ids: string[]) {
+    return this.request<{ removed: number; failed: string[] }>(`/projects/${projectId}/deploys/delete`, {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+  }
+
   /**
    * Limpeza em lote: mantém a release atual e as `keep` mais recentes depois dela.
    * `keep: 0` deixa só a que está em produção.

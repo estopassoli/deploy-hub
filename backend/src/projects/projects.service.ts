@@ -9,6 +9,7 @@ import { DeployService } from '../deploy/deploy.service';
 import { detectPackageManager } from '../deploy/package-manager';
 import { scanWorkspaceApps, filterAvailableServices } from './workspace-scan';
 import { removeApp, removeImages } from '../deploy/docker';
+import { selectDeletable, type DeletableRelease } from '../apps/release-deletion';
 
 const APPS_DIR = process.env.APPS_DIR || '/root/apps';
 const WWW_DIR = '/var/www';
@@ -254,6 +255,75 @@ export class ProjectsService {
     // tied to the App and are retained under the Project, so its deploy history survives.
     await this.prisma.app.delete({ where: { id: appId } });
     return { success: true };
+  }
+
+  /**
+   * Apaga releases de um projeto monorepo.
+   *
+   * ## Duas diferenças em relação ao app avulso
+   *
+   * 1. **Vários symlinks.** Cada service tem o próprio `current`. A release só é
+   *    segura se não for o alvo de nenhum deles — não basta olhar o `isCurrent` da
+   *    linha, que é um booleano e já se provou capaz de divergir do disco.
+   * 2. **Linhas filhas.** Uma release de projeto grava uma linha por service, ligada
+   *    pelo `parentId`. Como essa coluna não tem FK (adicioná-la no SQLite exigiria
+   *    recriar a tabela de histórico inteira), a limpeza das filhas é feita aqui, em
+   *    código. Sem isso sobrariam linhas órfãs apontando para um diretório que já não
+   *    existe.
+   */
+  async deleteDeploys(id: string, ids: string[]) {
+    const project = await this.prisma.project.findUnique({
+      where: { id },
+      include: { apps: { select: { name: true } } },
+    });
+    if (!project) throw new NotFoundException('Projeto não encontrado');
+    if (!Array.isArray(ids) || ids.length === 0) throw new BadRequestException('Nenhuma release selecionada');
+
+    // O `current` de cada service, lido do disco.
+    const alvos = project.apps.map((app) => {
+      try {
+        const link = path.join(APPS_DIR, app.name, 'current');
+        return fs.existsSync(link) ? fs.realpathSync(link) : null;
+      } catch {
+        return null;
+      }
+    });
+
+    const releases = (await this.prisma.deploy.findMany({
+      where: { projectId: id },
+    })) as unknown as DeletableRelease[];
+
+    const { toDelete, refused } = selectDeletable(releases, ids, alvos);
+
+    let removidas = 0;
+    const falhas = refused.map((r) => `${r.release.version}: ${r.reason}`);
+
+    for (const release of toDelete) {
+      try {
+        if (release.path && fs.existsSync(release.path)) {
+          const dir = assertInside(release.path, [APPS_DIR], 'diretório da release');
+          await run('rm', ['-rf', dir]);
+        }
+        // As filhas primeiro: sem FK, apagar só a pai deixaria órfãs.
+        await this.prisma.deploy.deleteMany({ where: { parentId: release.id } });
+        await this.prisma.deploy.delete({ where: { id: release.id } });
+        removidas++;
+      } catch (error: any) {
+        falhas.push(`${release.version}: ${error.message}`);
+      }
+    }
+
+    await this.prisma.systemLog.create({
+      data: {
+        level: falhas.length ? 'warn' : 'info',
+        message:
+          `${removidas} release(s) removida(s) do projeto ${project.name}` +
+          (falhas.length ? ` · ${falhas.length} recusada(s)` : ''),
+        source: 'cleanup',
+      },
+    });
+
+    return { removed: removidas, failed: falhas };
   }
 
   async rollback(id: string, deployId: string) {

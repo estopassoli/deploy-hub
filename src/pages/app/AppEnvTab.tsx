@@ -87,6 +87,7 @@ export default function AppEnvTab() {
 
       <EnvTable
         rows={rows}
+        fileName={`${app.name}.env`}
         onAdd={() => {
           const chave = window.prompt('Nome da variável (ex.: DATABASE_URL)')?.trim().toUpperCase();
           if (!chave) return;

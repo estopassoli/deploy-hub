@@ -105,3 +105,41 @@ export function selectPrunable(
 
   return { toDelete, kept };
 }
+
+/**
+ * Separa, de uma seleção, o que pode e o que não pode ser apagado.
+ *
+ * Existe para a exclusão em lote: a tela manda um conjunto de ids e precisa receber
+ * de volta **quais foram recusadas e por quê**, não um erro genérico. Apagar 9 de 10
+ * em silêncio, deixando a décima sem explicação, é pior do que recusar tudo.
+ *
+ * `currentTargets` aceita vários caminhos porque um projeto monorepo tem um symlink
+ * `current` por service: a release só é segura se não for o alvo de **nenhum** deles.
+ */
+export function selectDeletable(
+  releases: DeletableRelease[],
+  ids: string[],
+  currentTargets: (string | null)[],
+): { toDelete: DeletableRelease[]; refused: Array<{ release: DeletableRelease; reason: string }> } {
+  const pedidos = new Set(ids);
+  const alvos = currentTargets.filter((t): t is string => Boolean(t));
+
+  const toDelete: DeletableRelease[] = [];
+  const refused: Array<{ release: DeletableRelease; reason: string }> = [];
+
+  for (const release of releases) {
+    if (!pedidos.has(release.id)) continue;
+
+    // Basta um symlink apontar para ela.
+    const bloqueio = alvos
+      .map((alvo) => canDeleteRelease(release, alvo))
+      .find((v): v is { allowed: false; reason: string } => !v.allowed);
+
+    const veredito = bloqueio ?? canDeleteRelease(release, null);
+
+    if (veredito.allowed) toDelete.push(release);
+    else refused.push({ release, reason: veredito.reason });
+  }
+
+  return { toDelete, refused };
+}

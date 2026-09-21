@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { Copy, Eye, EyeOff, FileInput, Lock, Plus, Trash2 } from 'lucide-react';
+import { Copy, Download, Eye, EyeOff, FileInput, Lock, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { IconButton } from './icon-button';
 import { cn } from '@/lib/utils';
+import { serializeEnv } from '@/lib/env';
 import { TH } from './data-table';
 import { Tag } from './tag';
 
@@ -46,6 +47,7 @@ export function EnvTable({
   onPaste,
   onRemove,
   onCopy,
+  fileName,
   note,
 }: {
   rows: EnvRow[];
@@ -54,10 +56,38 @@ export function EnvTable({
   onPaste?: () => void;
   onRemove?: (key: string) => void;
   onCopy?: (row: EnvRow) => void;
+  /**
+   * Nome do arquivo no download. Ausente desliga o botão — no fluxo de criação não
+   * faz sentido baixar o que o próprio usuário acabou de digitar e ainda não gravou.
+   */
+  fileName?: string;
   note?: React.ReactNode;
 }) {
   const [revealed, setRevealed] = React.useState<Set<string>>(new Set());
   const grid = cn(variant === 'full' ? GRID_FULL : GRID_CREATE, GRID_MOBILE);
+
+  /**
+   * Baixa o `.env` inteiro, em texto puro.
+   *
+   * É deliberado, e é diferente de "revelar": revelar mostra um valor na tela; isto
+   * escreve todos eles num arquivo no disco de quem clicou. Vale existir porque o
+   * operador deste painel já tem shell root na máquina — negar o download só o
+   * empurraria para `cat ~/apps/<app>/current/.env`, que é a mesma exposição com mais
+   * passos. O que o botão faz é dizer claramente o que está entregando.
+   *
+   * A serialização é a mesma que grava no servidor (`serializeEnv`), então o arquivo
+   * baixado é byte a byte o que vira o `.env` no próximo deploy — inclusive as aspas
+   * em valores com espaço.
+   */
+  const baixar = () => {
+    const conteudo = serializeEnv(rows.map(({ key, value }) => ({ key, value })));
+    const url = URL.createObjectURL(new Blob([`${conteudo}\n`], { type: 'text/plain;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName ?? '.env';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const toggle = (key: string) =>
     setRevealed((atual) => {
@@ -152,6 +182,17 @@ export function EnvTable({
           </Button>
         )}
         <span className="min-w-0 flex-1" />
+        {fileName && rows.length > 0 && (
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={baixar}
+            title={`Baixa ${fileName} com os ${rows.length} valores em texto puro`}
+          >
+            <Download />
+            Baixar .env
+          </Button>
+        )}
         {onPaste && (
           <Button variant="secondary" size="xs" onClick={onPaste}>
             <FileInput />
