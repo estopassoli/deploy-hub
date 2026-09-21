@@ -34,7 +34,15 @@ export interface CertificateQuotaDomain {
   resetsAt: string | null;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://api-panel.auraai.chat/api';
+/**
+ * Base da API.
+ *
+ * Exportada porque duplicar este fallback já causou bug: a sondagem da tela de login
+ * tinha a própria cópia apontando para `http://localhost:10001/api`, então em produção
+ * ela batia na máquina de quem abria o painel — o Chrome bloqueava como acesso ao
+ * espaço de loopback e o rodapé dizia "API sem resposta" com a API no ar.
+ */
+export const API_URL = import.meta.env.VITE_API_URL || 'https://api-panel.auraai.chat/api';
 
 class ApiClient {
   // O token vive em token.ts para que o cliente WebSocket leia o mesmo valor e seja

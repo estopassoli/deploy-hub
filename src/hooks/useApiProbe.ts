@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_URL } from '@/lib/api';
 
 /**
  * A API está no ar, e em quanto tempo responde?
@@ -13,8 +14,6 @@ import { useEffect, useState } from 'react';
  */
 export type EstadoApi = 'verificando' | 'ok' | 'falhou';
 
-const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:10001/api').replace(/\/$/, '');
-
 export function useApiProbe() {
   const [estado, setEstado] = useState<EstadoApi>('verificando');
   const [latencia, setLatencia] = useState<number | null>(null);
@@ -25,7 +24,7 @@ export function useApiProbe() {
     const sondar = async () => {
       const inicio = performance.now();
       try {
-        await fetch(`${API_URL}/system/health`, { method: 'GET', cache: 'no-store' });
+        await fetch(`${API_URL.replace(/\/$/, '')}/system/health`, { method: 'GET', cache: 'no-store' });
         if (!vivo) return;
         setLatencia(Math.round(performance.now() - inicio));
         setEstado('ok');
