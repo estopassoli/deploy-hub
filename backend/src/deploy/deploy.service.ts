@@ -2,6 +2,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, OnModuleInit, forwardRef } from '@nestjs/common';
 import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { assertInside, assertSafeName } from '../common/paths';
 import { run, runQuiet, sudo } from '../common/run';
@@ -25,6 +26,7 @@ import {
 } from './package-manager';
 import type { PmInfo } from './package-manager';
 import { proxyVhostConfig, staticVhostConfig } from './nginx-config';
+import { allocatePorts, isReserved, parseListeningPorts } from './port-allocation';
 import { DeployLock, lockedMessage } from './deploy-lock';
 import { PhaseTracker } from './phase-tracker';
 import { normalizeHealthPath, waitForHealthy } from './health-check';
@@ -1238,15 +1240,67 @@ export class DeployService implements OnModuleInit {
     }
   }
 
+  /**
+   * Portas com alguém escutando agora.
+   *
+   * Lidas de `/proc/net/tcp` e `tcp6` em vez de `ss`/`netstat`: não depende de os
+   * binários estarem instalados e não abre um pipeline de shell. Falha em silêncio —
+   * sem essa informação a checagem fica igual à antiga (só o banco), que é pior mas
+   * não é motivo para derrubar o endpoint.
+   */
+  private async listeningPorts(): Promise<number[]> {
+    const portas = new Set<number>();
+
+    for (const arquivo of ['/proc/net/tcp', '/proc/net/tcp6']) {
+      try {
+        const conteudo = await fsp.readFile(arquivo, 'utf8');
+        for (const porta of parseListeningPorts(conteudo)) portas.add(porta);
+      } catch {
+        /* sem /proc ou sem permissão: segue com o que já tem */
+      }
+    }
+
+    return [...portas];
+  }
+
+  /**
+   * A porta está livre?
+   *
+   * Antes isto consultava só a tabela `App`. Uma porta livre no banco e ocupada por
+   * outro processo do servidor passava na validação e o deploy falhava no start —
+   * depois de clonar e buildar.
+   */
   async checkPort(port: number) {
     const app = await this.prisma.app.findFirst({ where: { port } });
-    const isSystemPort = port < 1024 || port === 10000 || port === 10001;
+    const escutando = (await this.listeningPorts()).includes(port);
+    const reservada = isReserved(port);
 
     return {
-      available: !app && !isSystemPort,
+      available: !app && !escutando && !reservada,
       usedBy: app?.name,
-      isSystemPort,
+      isSystemPort: reservada,
+      inUseByProcess: escutando && !app,
     };
+  }
+
+  /**
+   * Sugere `count` portas livres de uma vez.
+   *
+   * Existe para o fluxo de monorepo: preencher porta a porta para seis services, e
+   * torcer para nenhuma colidir, é trabalho que a máquina faz melhor. `exclude` recebe
+   * o que o formulário já escolheu, para o lote não repetir o que está na tela.
+   */
+  async suggestPorts(count: number, exclude: number[] = []) {
+    const apps = await this.prisma.app.findMany({ select: { port: true } });
+    const escutando = await this.listeningPorts();
+
+    const ports = allocatePorts(count, {
+      usedByApps: apps.map((a) => a.port),
+      listening: escutando,
+      alsoAvoid: exclude,
+    });
+
+    return { ports, requested: count };
   }
 
   async getDeployHistory() {

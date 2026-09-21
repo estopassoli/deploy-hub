@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, Loader2, Search } from 'lucide-react';
+import { Check, Loader2, Search, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -81,6 +81,7 @@ export default function NewDeploy() {
   const [env, setEnv] = useState<EnvRow[]>([]);
 
   const [erroPorta, setErroPorta] = useState<string | null>(null);
+  const [sugerindo, setSugerindo] = useState(false);
   const [nomesExistentes, setNomesExistentes] = useState<string[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -152,6 +153,66 @@ export default function NewDeploy() {
       setErroPorta(null);
     }
   }, []);
+
+  /**
+   * Portas repetidas **dentro do próprio formulário**.
+   *
+   * O servidor só sabe das portas que já estão no banco; duas linhas desta tela
+   * pedindo a mesma porta passariam pela validação dele e colidiriam no start.
+   */
+  const portasDuplicadas = useMemo(() => {
+    const vistas = new Map<string, number>();
+    for (const s of servicos ?? []) {
+      if (!s.incluir || !s.porta.trim()) continue;
+      vistas.set(s.porta.trim(), (vistas.get(s.porta.trim()) ?? 0) + 1);
+    }
+    return new Set([...vistas.entries()].filter(([, n]) => n > 1).map(([p]) => p));
+  }, [servicos]);
+
+  /**
+   * Preenche as portas vazias com portas livres de verdade.
+   *
+   * "Livre" aqui é o que o servidor responde: fora da faixa reservada, não usada por
+   * nenhum app cadastrado e **sem ninguém escutando** nela. As portas sugeridas pela
+   * detecção (lidas do `package.json` do repositório) costumam ser 3000/3001 — quase
+   * sempre já ocupadas num servidor com vários apps.
+   */
+  const preencherPortas = async (substituirTudo: boolean) => {
+    if (!servicos) return;
+    setSugerindo(true);
+    try {
+      const manter = substituirTudo
+        ? []
+        : servicos.filter((s) => s.incluir && s.porta.trim()).map((s) => parseInt(s.porta, 10));
+
+      const faltando = servicos.filter((s) => s.incluir && (substituirTudo || !s.porta.trim()));
+      if (faltando.length === 0) {
+        toast.info('Todos os services já têm porta');
+        return;
+      }
+
+      const { ports } = await api.suggestPorts(faltando.length, manter.filter(Number.isInteger));
+
+      if (ports.length < faltando.length) {
+        toast.warning(`O servidor só encontrou ${ports.length} porta(s) livre(s) para ${faltando.length} services`);
+      }
+
+      let i = 0;
+      setServicos(
+        servicos.map((s) => {
+          if (!s.incluir || (!substituirTudo && s.porta.trim())) return s;
+          const porta = ports[i++];
+          return porta ? { ...s, porta: String(porta) } : s;
+        }),
+      );
+
+      if (ports.length > 0) toast.success(`${ports.length} porta(s) preenchida(s)`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Não foi possível sugerir portas');
+    } finally {
+      setSugerindo(false);
+    }
+  };
 
   const nomeDuplicado = nomesExistentes.includes(nome.trim());
 
@@ -270,6 +331,18 @@ export default function NewDeploy() {
             <CardHeader>
               <CardTitle>{ehMonorepo ? 'Services detectados' : 'Configuração do app'}</CardTitle>
               <span className="flex-1" />
+              {ehMonorepo && (
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  aria-busy={sugerindo ? 'true' : undefined}
+                  onClick={() => preencherPortas(false)}
+                  title="Preenche as portas vazias com portas livres no servidor"
+                >
+                  {sugerindo ? <Loader2 className="animate-spin" aria-hidden /> : <Wand2 aria-hidden />}
+                  Preencher portas
+                </Button>
+              )}
               {packageManager && <Tag>{packageManager}</Tag>}
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
@@ -323,17 +396,26 @@ export default function NewDeploy() {
                           {s.hasPrisma && ' · prisma'}
                         </span>
                       </div>
-                      <Input
-                        value={s.porta}
-                        onChange={(e) => {
-                          const copia = [...servicos!];
-                          copia[i] = { ...s, porta: e.target.value };
-                          setServicos(copia);
-                        }}
-                        placeholder="porta"
-                        aria-label={`Porta de ${s.nome}`}
-                        className="font-mono tabular-nums text-[12.5px]"
-                      />
+                      <div className="flex flex-col gap-1">
+                        <Input
+                          value={s.porta}
+                          onChange={(e) => {
+                            const copia = [...servicos!];
+                            copia[i] = { ...s, porta: e.target.value };
+                            setServicos(copia);
+                          }}
+                          placeholder="porta"
+                          aria-label={`Porta de ${s.nome}`}
+                          aria-invalid={portasDuplicadas.has(s.porta.trim())}
+                          className={cn(
+                            'font-mono tabular-nums text-[12.5px]',
+                            portasDuplicadas.has(s.porta.trim()) && 'border-red',
+                          )}
+                        />
+                        {portasDuplicadas.has(s.porta.trim()) && (
+                          <span className="text-2xs leading-4 text-red">repetida</span>
+                        )}
+                      </div>
                       <Input
                         value={s.dominio}
                         onChange={(e) => {
@@ -417,6 +499,22 @@ export default function NewDeploy() {
             </CardContent>
           </Card>
 
+          {ehMonorepo && servicos!.some((s) => s.incluir && !s.porta.trim()) && (
+            <Callout
+              tone="amber"
+              title="Alguns services estão sem porta"
+              action={
+                <Button variant="secondary" size="xs" onClick={() => preencherPortas(false)}>
+                  <Wand2 aria-hidden />
+                  Preencher
+                </Button>
+              }
+            >
+              O painel escolhe portas livres olhando os apps cadastrados e o que está escutando na
+              máquina.
+            </Callout>
+          )}
+
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size={viewport === 'desktop' ? 'page' : 'touch'} onClick={() => setPasso(0)}>
               Voltar
@@ -424,7 +522,14 @@ export default function NewDeploy() {
             <Button
               variant="primary"
               size={viewport === 'desktop' ? 'page' : 'touch'}
-              disabled={!nome.trim() || nomeDuplicado || Boolean(erroPorta) || enviando}
+              disabled={
+                !nome.trim() ||
+                nomeDuplicado ||
+                Boolean(erroPorta) ||
+                portasDuplicadas.size > 0 ||
+                (ehMonorepo && servicos!.some((s) => s.incluir && !s.porta.trim())) ||
+                enviando
+              }
               aria-busy={enviando ? 'true' : undefined}
               onClick={enviar}
             >

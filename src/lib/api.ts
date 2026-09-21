@@ -258,8 +258,22 @@ class ApiClient {
     return this.request<any>(`/deploy/${appId}`, { method: 'POST' });
   }
 
+  /**
+   * Sugere `count` portas livres de uma vez.
+   *
+   * `exclude` são as portas já escolhidas no formulário aberto, para o lote não
+   * repetir o que está na tela. O servidor considera apps cadastrados **e** o que
+   * está escutando na máquina.
+   */
+  async suggestPorts(count: number, exclude: number[] = []) {
+    const qs = exclude.length ? `&exclude=${exclude.join(',')}` : '';
+    return this.request<{ ports: number[]; requested: number }>(`/deploy/free-ports?count=${count}${qs}`);
+  }
+
   async checkPort(port: number) {
-    return this.request<{ available: boolean; usedBy?: string; isSystemPort: boolean }>(`/deploy/check-port/${port}`);
+    return this.request<{ available: boolean; usedBy?: string; isSystemPort: boolean; inUseByProcess?: boolean }>(
+      `/deploy/check-port/${port}`,
+    );
   }
 
   async getDeployHistory() {

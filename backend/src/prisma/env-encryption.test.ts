@@ -199,3 +199,76 @@ test('a senha do usuário nunca é tocada pelo middleware', async () => {
   );
   assert.equal((resultado as any).password, `${ENCRYPTED_PREFIX}nao-mexer`);
 });
+
+// --- o middleware não pode destruir valores que não são objeto literal -----------
+
+test('Date sobrevive à passagem pelo middleware', async () => {
+  /*
+   * O bug que isto fixa: `typeof new Date() === 'object'`, então a travessia recursava
+   * no Date e o reconstruía com `{ ...valor }` — que dá `{}`, porque Date não tem
+   * propriedade própria enumerável. Em produção, toda checagem de uptime falhava com
+   * "Argument `lastUptimeAt`: Expected DateTime, provided Object".
+   */
+  const middleware = createEnvEncryptionMiddleware(randomBytes(32));
+  const quando = new Date('2026-09-21T06:35:01.000Z');
+
+  let recebido: any;
+  await middleware(
+    {
+      model: 'App',
+      action: 'update',
+      args: { where: { id: 'x' }, data: { lastUptimeStatus: 'down', lastUptimeAt: quando } },
+      dataPath: [],
+      runInTransaction: false,
+    } as any,
+    async (params: any) => {
+      recebido = params.args.data;
+      return {};
+    },
+  );
+
+  assert.ok(recebido.lastUptimeAt instanceof Date, 'deveria continuar sendo Date');
+  assert.equal(recebido.lastUptimeAt.toISOString(), quando.toISOString());
+  assert.equal(recebido.lastUptimeStatus, 'down');
+});
+
+test('Date aninhada em create também sobrevive', async () => {
+  const middleware = createEnvEncryptionMiddleware(randomBytes(32));
+  const quando = new Date('2026-09-21T00:00:00.000Z');
+
+  let recebido: any;
+  await middleware(
+    {
+      model: 'Project',
+      action: 'create',
+      args: { data: { name: 'p', envVars: 'A=1', apps: { create: [{ name: 'a', lastUptimeAt: quando }] } } },
+      dataPath: [],
+      runInTransaction: false,
+    } as any,
+    async (params: any) => {
+      recebido = params.args.data;
+      return {};
+    },
+  );
+
+  assert.ok(recebido.apps.create[0].lastUptimeAt instanceof Date);
+  // E a criptografia do campo vizinho continua acontecendo.
+  assert.equal(isEncrypted(recebido.envVars), true);
+});
+
+test('Buffer não vira objeto vazio', async () => {
+  const middleware = createEnvEncryptionMiddleware(randomBytes(32));
+  const bytes = Buffer.from('conteudo');
+
+  let recebido: any;
+  await middleware(
+    { model: 'App', action: 'update', args: { where: { id: 'x' }, data: { blob: bytes } }, dataPath: [], runInTransaction: false } as any,
+    async (params: any) => {
+      recebido = params.args.data;
+      return {};
+    },
+  );
+
+  assert.ok(Buffer.isBuffer(recebido.blob));
+  assert.equal(recebido.blob.toString(), 'conteudo');
+});

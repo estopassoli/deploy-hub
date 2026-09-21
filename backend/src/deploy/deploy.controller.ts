@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Param, UseGuards, Get } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { IsString, IsNumber, IsOptional, IsIn, IsBoolean, Matches, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { DeployService } from './deploy.service';
@@ -91,6 +91,23 @@ export class DeployController {
   }
 
   @UseGuards(JwtAuthGuard)
+  /**
+   * Sugere N portas livres de uma vez, para o fluxo de monorepo.
+   *
+   * `exclude` recebe o que o formulário já escolheu, separado por vírgula, para o
+   * lote não repetir o que está na tela.
+   */
+  @Get('free-ports')
+  async freePorts(@Query('count') count?: string, @Query('exclude') exclude?: string) {
+    const quantos = Math.min(Math.max(parseInt(count ?? '1', 10) || 1, 1), 50);
+    const evitar = (exclude ?? '')
+      .split(',')
+      .map((p) => parseInt(p.trim(), 10))
+      .filter((p) => Number.isInteger(p));
+
+    return this.deployService.suggestPorts(quantos, evitar);
+  }
+
   @Get('check-port/:port')
   async checkPort(@Param('port') port: string) {
     return this.deployService.checkPort(parseInt(port));

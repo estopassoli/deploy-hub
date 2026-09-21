@@ -68,12 +68,30 @@ const WRITE_ACTIONS = new Set([
  * `{ set: 'A=1' }`, arrays (`createMany.data`) e blocos aninhados
  * (`apps: { create: [...] }`).
  */
+/**
+ * Só objeto literal é percorrido.
+ *
+ * `typeof x === 'object'` é verdadeiro para `Date`, `Buffer`, `Decimal` e qualquer
+ * instância de classe. Recursar neles e reconstruí-los com `{ ...valor }` produz um
+ * objeto vazio: um `Date` não tem propriedades próprias enumeráveis.
+ *
+ * O efeito disso em produção foi silencioso e real — `lastUptimeAt: new Date()`
+ * chegava ao Prisma como `{}` e toda checagem de uptime falhava com "Expected
+ * DateTime, provided Object". O mesmo valeria para `sslExpiresAt` e qualquer data
+ * gravada em App ou Project.
+ */
+function ehObjetoSimples(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function walkWriteData(value: unknown, transform: (text: string) => string): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => walkWriteData(item, transform));
   }
 
-  if (!value || typeof value !== 'object') return value;
+  if (!ehObjetoSimples(value)) return value;
 
   const source = value as Record<string, unknown>;
   const result: Record<string, unknown> = { ...source };
@@ -88,7 +106,7 @@ function walkWriteData(value: unknown, transform: (text: string) => string): unk
       continue;
     }
 
-    if (item && typeof item === 'object') {
+    if (Array.isArray(item) || ehObjetoSimples(item)) {
       result[key] = walkWriteData(item, transform);
     }
   }
