@@ -158,8 +158,16 @@ if ! grep -qE '^[[:space:]]*ENV_ENCRYPTION_KEY=.+' "$BACKEND_ENV"; then
 fi
 
 # 2. Atualizar dependências do Frontend
+#
+# `--include=dev` não é redundante: o build precisa de vite, do plugin do React, do
+# Tailwind e do TypeScript, e todos são devDependencies. Num servidor com
+# NODE_ENV=production no ambiente — o caso normal — `npm install` puro pula essas
+# dependências, e o `npm install` seguinte ainda responde "up to date", porque a
+# árvore instalada bate com o que ele acha que deveria estar lá. O build então falha
+# com `Cannot find package '@vitejs/plugin-react-swc'`, que não diz nada sobre a
+# causa.
 print_status "Atualizando dependências do frontend..."
-npm install
+npm install --include=dev
 print_success "Dependências do frontend atualizadas"
 
 # 3. Build do Frontend
@@ -174,9 +182,12 @@ sudo cp -r dist/* /var/www/deployhub-panel/
 print_success "Arquivos do frontend atualizados"
 
 # 4. Atualizar dependências do Backend
+#
+# Mesma razão do frontend: `nest build`, o `tsc` e o CLI do Prisma são
+# devDependencies.
 print_status "Atualizando dependências do backend..."
 cd "$DEPLOYHUB_DIR/backend"
-npm install
+npm install --include=dev
 print_success "Dependências do backend atualizadas"
 
 # 5. Gerar Prisma Client
