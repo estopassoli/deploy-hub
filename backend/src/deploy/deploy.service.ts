@@ -6,6 +6,7 @@ import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { assertInside, assertSafeName } from '../common/paths';
 import { run, runQuiet, sudo } from '../common/run';
+import { pm2Env } from '../common/pm2-env';
 import { isSafeDomain } from '../common/validation';
 import { AppsService } from '../apps/apps.service';
 import { EmailService } from '../email/email.service';
@@ -386,7 +387,7 @@ export class DeployService implements OnModuleInit {
       if (app.activeRuntime === 'docker') {
         await this.appsService.rollback(app.id, anterior.id);
       } else if (!isStaticPreset(app.type)) {
-        await runQuiet('pm2', ['restart', app.name]);
+        await runQuiet('pm2', ['restart', app.name], { env: pm2Env() });
       }
 
       await this.prisma.deploy.updateMany({ where: { appId: app.id }, data: { isCurrent: false } });
@@ -448,11 +449,11 @@ export class DeployService implements OnModuleInit {
 
     if (strategy === 'reload') {
       this.log(o.key, '  Recarregando processo (sem janela de 502)...', o.deployId);
-      await run('pm2', ['startOrReload', o.configPath, '--update-env']);
+      await run('pm2', ['startOrReload', o.configPath, '--update-env'], { env: pm2Env() });
     } else {
       this.log(o.key, '  Recriando processo no PM2...', o.deployId);
       await runQuiet('pm2', ['delete', o.name]);
-      await run('pm2', ['start', o.configPath]);
+      await run('pm2', ['start', o.configPath], { env: pm2Env() });
     }
 
     await run('pm2', ['save']);
@@ -521,7 +522,7 @@ export class DeployService implements OnModuleInit {
       restarted = true;
       this.log(ownerName, `✓ Container de ${app.name} recriado com as variáveis novas`);
     } else {
-      await run('pm2', ['restart', app.name, '--update-env']);
+      await run('pm2', ['restart', app.name, '--update-env'], { env: pm2Env() });
       restarted = true;
       this.log(ownerName, `✓ ${app.name} reiniciado com as variáveis novas`);
     }
@@ -1978,7 +1979,7 @@ export class DeployService implements OnModuleInit {
         const distDir = svc.appDir ? path.join(deploy.path, svc.appDir, outDir) : path.join(deploy.path, outDir);
         await this.publishStatic(svc.name, distDir).catch(() => undefined);
       } else {
-        await runQuiet('pm2', ['restart', svc.name]);
+        await runQuiet('pm2', ['restart', svc.name], { env: pm2Env() });
       }
     }
     await this.prisma.deploy.updateMany({ where: { projectId }, data: { isCurrent: false } });

@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { assertInside, assertSafeName } from '../common/paths';
 import { run, runShell, sudo } from '../common/run';
+import { pm2Env } from '../common/pm2-env';
 import { isStaticPreset } from '../deploy/app-presets';
 import { dockerLimitFlags } from '../deploy/resource-limits';
 import { proxyVhostConfig, staticVhostConfig } from '../deploy/nginx-config';
@@ -375,7 +376,7 @@ export class AppsService {
 
       if (existsInPM2) {
         // Process exists, just start it
-        await run('pm2', ['start', app.name]);
+        await run('pm2', ['start', app.name], { env: pm2Env() });
       } else {
         // Process doesn't exist in PM2, need to start from path
         const currentPath = app.currentPath || path.join(APPS_DIR, app.name, 'current');
@@ -400,7 +401,7 @@ export class AppsService {
           startArgs = ['start', 'npm', ...base, '--', 'run', 'start'];
         }
 
-        await run('pm2', startArgs);
+        await run('pm2', startArgs, { env: pm2Env() });
       }
 
       await run('pm2', ['save']);
@@ -444,7 +445,7 @@ export class AppsService {
       if (isDocker(app)) {
         await restartContainers(app.name);
       } else {
-        await run('pm2', ['restart', app.name]);
+        await run('pm2', ['restart', app.name], { env: pm2Env() });
       }
       return { success: true };
     } catch (error) {
@@ -641,7 +642,7 @@ export class AppsService {
         await this.rollbackDocker(app, deploy);
       } else if (!isStaticPreset(app.type)) {
         // Restart PM2 if needed
-        await run('pm2', ['restart', app.name]);
+        await run('pm2', ['restart', app.name], { env: pm2Env() });
       }
 
       // Update deploy flags
