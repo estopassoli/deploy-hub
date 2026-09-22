@@ -195,6 +195,26 @@ print_status "Gerando Prisma Client..."
 npx prisma generate
 print_success "Prisma Client gerado"
 
+# 5.1 O banco está no caminho que o Prisma vai abrir?
+#
+# O `schema.prisma` declara `url = "file:./deployhub.db"`, resolvido relativo à pasta
+# do schema. Instalações antigas guardavam o arquivo um nível acima, em `backend/`.
+# Nessas, o `migrate deploy` não acha banco no lugar canônico, CRIA UM VAZIO e aplica
+# tudo nele — o update termina "com sucesso" e o operador descobre pelo login recusado
+# que o painel está vendo um banco sem usuário, sem app e sem histórico.
+#
+# Aconteceu em produção. A checagem custa a leitura de dois arquivos.
+if [ -f scripts/check-db-location.mjs ]; then
+    print_status "Verificando o caminho do banco..."
+    if node scripts/check-db-location.mjs; then
+        print_success "Banco no caminho esperado"
+    else
+        echo ""
+        print_error "Atualização interrompida. NADA foi alterado no banco nem no serviço."
+        exit 1
+    fi
+fi
+
 # 6. Backup do banco antes de qualquer migração
 # O banco inteiro do painel é um arquivo SQLite: apps, projetos, histórico de deploys,
 # métricas e usuários. Copiar antes de migrar custa milissegundos e é a diferença entre
