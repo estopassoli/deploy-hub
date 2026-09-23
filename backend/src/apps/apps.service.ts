@@ -788,6 +788,17 @@ export class AppsService {
       : proxyVhostConfig({ domain: app.domain, port: app.port, hasCert });
 
     const configPath = `/etc/nginx/sites-enabled/${app.name}.conf`;
+
+    // Sem domínio não há vhost — ver nginx-config.ts. Remove o que existir para a
+    // config não continuar afirmando uma rota que o banco já não descreve.
+    if (!config) {
+      await fs.promises.rm(configPath, { force: true });
+      await run('nginx', ['-t']);
+      await run('nginx', ['-s', 'reload']);
+      console.warn(`[nginx] ${app.name} está sem domínio: nenhum vhost gerado (o app só responde em 127.0.0.1:${app.port}).`);
+      return;
+    }
+
     await fs.promises.writeFile(configPath, config);
     await run('nginx', ['-t']);
     await run('nginx', ['-s', 'reload']);

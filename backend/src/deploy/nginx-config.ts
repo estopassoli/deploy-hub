@@ -8,6 +8,17 @@
  * the certbot-managed config with an HTTP-only vhost (which would make the
  * domain fall through to nginx's 443 default_server — i.e. the wrong app).
  *
+ *
+ * Sem domínio não existe vhost possível. Antes estes geradores caíam em
+ * `server_name _`, que não casa com Host nenhum: o domínio real ia parar no
+ * default_server (o catch-all), que fecha a conexão sem responder. O deploy
+ * seguia reportando sucesso — os processos sobem, só não há caminho até eles.
+ * Em 23/09/2026 isso derrubou o agendaexpert, com o Cloudflare exibindo 520
+ * enquanto os três services respondiam 200 em localhost.
+ *
+ * Agora devolvem string vazia, e cabe ao chamador não escrever vhost nenhum e
+ * avisar alto no log do deploy.
+ *
  * :80 keeps serving the app (no forced redirect) so certbot's nginx renewal
  * challenge on port 80 is never obstructed.
  */
@@ -54,7 +65,8 @@ ${body}
 }
 
 export function proxyVhostConfig(opts: { domain?: string | null; port: number; hasCert?: boolean }): string {
-  const serverName = opts.domain || '_';
+  if (!opts.domain) return '';
+  const serverName = opts.domain;
   const body = `    location / {
         proxy_pass http://127.0.0.1:${opts.port};
         proxy_http_version 1.1;
@@ -71,7 +83,8 @@ export function proxyVhostConfig(opts: { domain?: string | null; port: number; h
 }
 
 export function staticVhostConfig(opts: { domain?: string | null; appName: string; hasCert?: boolean }): string {
-  const serverName = opts.domain || '_';
+  if (!opts.domain) return '';
+  const serverName = opts.domain;
   const body = `    root /var/www/${opts.appName};
     index index.html;
 

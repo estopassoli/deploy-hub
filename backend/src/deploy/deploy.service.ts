@@ -503,16 +503,29 @@ export class DeployService implements OnModuleInit {
     const appWorkDir = app.appDir ? path.join(releaseDir, app.appDir) : releaseDir;
     const alvo = path.join(appWorkDir, '.env');
 
+    // O que de fato chega ao processo é o env do projeto com o do service por cima —
+    // a mesma sobreposição que `startService` monta no deploy.
+    //
+    // Aqui existia `const novo = app.project ? serviceEnv : serviceEnv`, um ternário
+    // com os dois ramos iguais. Para um service de projeto (que normalmente tem o env
+    // todo no projeto e nada próprio) isso fazia o "Aplicar variáveis" comparar e
+    // gravar string vazia: o diff dizia "nada mudou" e o .env do appDir virava um
+    // arquivo vazio, enquanto o env do projeto era ignorado.
+    const efetivo = { ...this.parseEnvVars(projectEnv || undefined), ...this.parseEnvVars(serviceEnv || undefined) };
+    const efetivoTexto = renderEnvFile(efetivo);
+
     const anterior = await fs.promises.readFile(alvo, 'utf-8').catch(() => '');
-    const novo = app.project ? serviceEnv : serviceEnv;
-    const diff = diffEnv(anterior, novo);
+    const anteriorEfetivo = Object.keys(this.parseEnvVars(anterior || undefined)).length
+      ? anterior
+      : await fs.promises.readFile(path.join(releaseDir, '.env'), 'utf-8').catch(() => '');
+    const diff = diffEnv(anteriorEfetivo, efetivoTexto);
 
     this.log(ownerName, `▶ Aplicando variáveis de ambiente em ${app.name} (${describeEnvDiff(diff)})`);
 
     if (app.project && projectEnv) {
       await this.writeEnvFile(path.join(releaseDir, '.env'), projectEnv);
     }
-    await this.writeEnvFile(alvo, novo);
+    await this.writeEnvFile(alvo, serviceEnv);
 
     let restarted = false;
     if (app.activeRuntime === 'docker') {
@@ -521,10 +534,43 @@ export class DeployService implements OnModuleInit {
       await this.appsService.restart(app.id);
       restarted = true;
       this.log(ownerName, `✓ Container de ${app.name} recriado com as variáveis novas`);
-    } else {
-      await run('pm2', ['restart', app.name, '--update-env'], { env: pm2Env() });
+    } else if (!isStaticPreset(app.type)) {
+      // Reiniciar sozinho não bastava: o env que o processo enxerga vem do bloco
+      // `env` do ecosystem, gerado no deploy. Um `pm2 restart --update-env` relê o
+      // ambiente de QUEM CHAMOU o pm2, não o ecosystem — então as variáveis novas
+      // chegavam ao .env em disco e nunca ao process.env do app, que seguia com os
+      // valores do último deploy. Por isso "salvar e aplicar" parecia não salvar.
+      //
+      // Agora o ecosystem é regenerado com o env efetivo antes do reload.
+      const pm = detectPackageManager(releaseDir);
+      const effectiveType = detectAppType(appWorkDir) || app.type;
+      const cfg = this.generatePM2Config(app, currentLink, efetivo, app.startCommand || undefined, {
+        pm,
+        pkg: app.workspacePackage || undefined,
+        effectiveType,
+      });
+
+      if (cfg) {
+        const cfgPath = app.project
+          ? path.join(APPS_DIR, ownerName, `${app.name}.ecosystem.config.js`)
+          : path.join(APPS_DIR, app.name, 'ecosystem.config.js');
+        await this.startOrReloadPm2({
+          name: app.name,
+          configPath: cfgPath,
+          nextConfig: cfg,
+          previousRuntime: app.activeRuntime,
+          key: ownerName,
+        });
+      } else {
+        // Preset sem ecosystem gerado (o generatePM2Config devolve '' fora de
+        // nextjs/nestjs): resta o restart simples.
+        await run('pm2', ['restart', app.name, '--update-env'], { env: pm2Env() });
+      }
+
       restarted = true;
       this.log(ownerName, `✓ ${app.name} reiniciado com as variáveis novas`);
+    } else {
+      this.log(ownerName, `  ${app.name} é estático — nada a reiniciar.`);
     }
 
     const message = diff.buildRequired.length
@@ -2155,6 +2201,19 @@ ${envString}
     const safeName = assertSafeName(app.name, 'nome do app');
     const configPath = path.join(NGINX_AVAILABLE, `${safeName}.conf`);
     const enabledPath = path.join(NGINX_ENABLED, `${safeName}.conf`);
+
+    // App sem domínio: nada de vhost de mentira — ver nginx-config.ts. Desabilita o
+    // que houver, para a config refletir o banco, e avisa no log em vez de deixar o
+    // deploy passar por bem-sucedido com o domínio caindo no catch-all.
+    if (!config) {
+      await runQuiet('sudo', ['rm', '-f', enabledPath]);
+      await sudo('nginx', ['-t']);
+      await sudo('systemctl', ['reload', 'nginx']);
+      this.log(app.name, `  ⚠️ ${app.name} está sem domínio: nenhum vhost foi gerado.`);
+      this.log(app.name, `     O processo sobe e responde em 127.0.0.1:${app.port}, mas nenhum domínio chega nele.`);
+      this.log(app.name, '     Preencha o domínio nas configurações e faça o deploy de novo.');
+      return;
+    }
 
     // Write config to sites-available first
     const tempPath = path.join('/tmp', `${safeName}.nginx.conf`);
