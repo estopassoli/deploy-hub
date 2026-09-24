@@ -247,7 +247,49 @@ export function localBinDirs(cwd: string, boundary?: string): string[] {
  * that only exists in its own release.
  */
 export function hardenedPath(cwd: string, basePath: string, boundary?: string): string {
-  return [...localBinDirs(cwd, boundary), basePath].filter(Boolean).join(path.delimiter);
+  return [...localBinDirs(cwd, boundary), deployNodeBin(), basePath].filter(Boolean).join(path.delimiter);
+}
+
+/**
+ * Diretório `bin` do Node com que os deploys devem rodar.
+ *
+ * ## Por que isto existe
+ *
+ * O backend do painel roda sob o Node do sistema e **tudo que ele dispara herda
+ * esse Node** — o PATH do processo só tem caminhos de sistema. Quando a máquina
+ * tem um Node mais novo instalado à parte (nvm, asdf, volta e meia é o caso), o
+ * build continua usando o antigo. Aí um projeto que exige Node moderno falha com
+ * um erro que não se parece nada com "versão de Node errada":
+ *
+ *     pnpm@11 (engines: node >=22.13) sob Node 20:
+ *       ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING, lançado lá dentro do corepack
+ *
+ *     vinext@1 sob Node 20:
+ *       SyntaxError: 'node:fs/promises' does not provide an export named 'glob'
+ *       (fs.promises.glob só existe a partir do Node 22)
+ *
+ * Nos dois casos o operador perde tempo caçando bug de ferramenta quando o
+ * problema é a versão do runtime.
+ *
+ * ## Como configurar
+ *
+ * `DEPLOY_NODE_BIN` no `.env` do painel aponta o diretório `bin` a usar, por
+ * exemplo `/root/.nvm/versions/node/v24.11.1/bin`. Ele entra **depois** dos
+ * `node_modules/.bin` da release (o binário do projeto continua ganhando) e
+ * **antes** do PATH do sistema, então `node`, `corepack`, `npm` e `pnpm` passam
+ * a resolver para essa versão — tanto no build quanto no `env.PATH` do ecosystem
+ * gerado, de modo que o app roda no mesmo Node em que foi construído.
+ *
+ * Vazio, ou apontando para um diretório sem `node` dentro, mantém o
+ * comportamento antigo: herdar o Node do backend. Assim uma instalação que não
+ * configurou nada não muda de comportamento no update.
+ */
+export function deployNodeBin(): string {
+  const dir = (process.env.DEPLOY_NODE_BIN || '').trim();
+  if (!dir) return '';
+  // Um caminho errado no .env não pode virar um PATH quebrado: sem `node` ali
+  // dentro, o diretório simplesmente não entra.
+  return fs.existsSync(path.join(dir, 'node')) ? dir : '';
 }
 
 /**

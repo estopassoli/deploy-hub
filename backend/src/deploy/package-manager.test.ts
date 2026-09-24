@@ -17,6 +17,8 @@ import {
   readPackageName,
   binResolverPrelude,
   type PmInfo,
+  deployNodeBin,
+  hardenedPath,
 } from './package-manager.ts';
 
 function tmp(files: Record<string, string>): string {
@@ -242,4 +244,45 @@ test('parseStartPort reads -p and --port', () => {
   assert.equal(parseStartPort({ start: 'next start -p 3002' }), 3002);
   assert.equal(parseStartPort({ start: 'node dist/main.js', dev: 'next dev --port 3000' }), 3000);
   assert.equal(parseStartPort({ start: 'node dist/main.js' }), null);
+});
+
+// --- deployNodeBin / hardenedPath ---
+
+test('deployNodeBin vazio quando DEPLOY_NODE_BIN não está definida', () => {
+  delete process.env.DEPLOY_NODE_BIN;
+  assert.equal(deployNodeBin(), '');
+});
+
+test('deployNodeBin ignora diretório que não tem node dentro', () => {
+  process.env.DEPLOY_NODE_BIN = '/caminho/que/nao/existe/bin';
+  assert.equal(deployNodeBin(), '', 'um .env errado não pode virar PATH quebrado');
+  delete process.env.DEPLOY_NODE_BIN;
+});
+
+test('deployNodeBin devolve o diretório quando tem node dentro', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nodebin-'));
+  fs.writeFileSync(path.join(dir, 'node'), '');
+  process.env.DEPLOY_NODE_BIN = dir;
+  assert.equal(deployNodeBin(), dir);
+  delete process.env.DEPLOY_NODE_BIN;
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('hardenedPath põe o node configurado depois dos bins locais e antes do sistema', () => {
+  const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'release-'));
+  const localBin = path.join(raiz, 'node_modules', '.bin');
+  fs.mkdirSync(localBin, { recursive: true });
+
+  const nodeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nodebin-'));
+  fs.writeFileSync(path.join(nodeDir, 'node'), '');
+  process.env.DEPLOY_NODE_BIN = nodeDir;
+
+  const partes = hardenedPath(raiz, '/usr/bin:/bin').split(path.delimiter);
+  assert.equal(partes[0], localBin, 'o binário do projeto continua ganhando');
+  assert.equal(partes[1], nodeDir, 'o node configurado vem antes do sistema');
+  assert.deepEqual(partes.slice(2), ['/usr/bin', '/bin'], 'o PATH do sistema vem por último');
+
+  delete process.env.DEPLOY_NODE_BIN;
+  fs.rmSync(raiz, { recursive: true, force: true });
+  fs.rmSync(nodeDir, { recursive: true, force: true });
 });
