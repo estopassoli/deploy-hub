@@ -135,6 +135,7 @@ O script realiza `git pull`, **verifica se `JWT_SECRET` está configurado** (abo
 | `WEBHOOK_SECRET` | Segredo HMAC para validar webhooks GitHub | gerado pelo `setup.sh` |
 | `WEBHOOK_ALLOW_UNSIGNED` | Fallback de transição: aceita webhook de app **sem** segredo. Ausente (padrão) = recusa com 401. Enquanto ligado, quem souber o nome do app dispara deploys | _(ausente)_ |
 | `APPS_DIR` | Diretório onde os apps são provisionados/clonados | `/root/apps` |
+| `DEPLOY_NODE_BIN` | Diretório `bin` do Node com que os deploys (install/build) e os apps gerenciados rodam. Vazio = herda o Node do backend. Configure quando o servidor tiver um Node mais novo à parte (nvm) e algum projeto exigir uma versão acima da do backend — sem isto o build falha com erro que não parece de versão (ver abaixo) | `/root/.nvm/versions/node/v24.11.1/bin` |
 | `API_URL` | URL base usada pelo serviço de webhook para chamar a API interna | `https://api-panel.auraai.chat` (ajuste para seu host) |
 | `SSH_HOST` | Host/IP acessado pelo controlador de webhooks para executar comandos remotos | _(obrigatório para deploy remoto)_ |
 | `SSH_USER` | Usuário SSH (default `root`) | `root` |
@@ -157,6 +158,31 @@ As variáveis de ambiente de cada app (`App.envVars`) e de cada projeto monorepo
 (`Project.envVars`) guardam o `.env` inteiro da aplicação — senha de banco, chave de API,
 segredo de JWT. Elas são criptografadas no banco com **AES-256-GCM**, usando
 `ENV_ENCRYPTION_KEY`.
+
+### Quando configurar `DEPLOY_NODE_BIN`
+
+O backend roda sob o Node do sistema e **tudo que ele dispara herda esse Node** — o
+`PATH` do processo só tem caminhos de sistema, sem nvm. Se a máquina tem um Node mais
+novo instalado à parte, o build continua usando o antigo, e um projeto que exige um Node
+moderno falha com um erro que não se parece com "versão errada":
+
+```
+# pnpm@11 (engines: node >=22.13) sob Node 20
+ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING: A dynamic import callback was not specified.
+    at .../corepack/v1/pnpm/11.24.0/bin/pnpm.cjs:3:1
+
+# vinext@1 sob Node 20
+SyntaxError: The requested module 'node:fs/promises' does not provide an export named 'glob'
+```
+
+Aponte `DEPLOY_NODE_BIN` para o `bin` do Node desejado. Ele entra depois dos
+`node_modules/.bin` da release — o binário do projeto continua ganhando — e antes do
+`PATH` do sistema, valendo no build e no `env.PATH` do ecosystem gerado, de modo que o
+app roda no mesmo Node em que foi construído.
+
+Subir o Node do **próprio backend** é outra história: `node-pty` tem binário compilado
+para a ABI do Node atual, e trocar o interpretador quebra o terminal do painel sem um
+`npm rebuild node-pty`.
 
 - A criptografia acontece na borda do Prisma, então vale para todos os caminhos de
   leitura e escrita, inclusive código novo.
