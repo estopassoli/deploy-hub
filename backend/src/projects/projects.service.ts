@@ -114,6 +114,12 @@ export class ProjectsService {
     if (await this.prisma.project.findUnique({ where: { name: dto.name } })) {
       throw new ConflictException(`Projeto ${dto.name} já existe`);
     }
+    // App names are global: prefix each service with the project name so two monorepos
+    // that both have an `apps/web` don't collide. Already-prefixed names are kept as-is.
+    const prefix = `${dto.name}-`;
+    for (const s of dto.services) {
+      if (!s.name.startsWith(prefix)) s.name = prefix + s.name;
+    }
     const names = new Set<string>();
     for (const s of dto.services) {
       if (names.has(s.name)) throw new ConflictException(`Service duplicado: ${s.name}`);

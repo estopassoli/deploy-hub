@@ -54,7 +54,6 @@ interface ServicoDetectado {
   hasPrisma: boolean;
   /** Escolhas do usuário no passo 02. */
   incluir: boolean;
-  nome: string;
   porta: string;
   dominio: string;
 }
@@ -123,7 +122,6 @@ export default function NewDeploy() {
         res.services.map((s) => ({
           ...s,
           incluir: true,
-          nome: s.suggestedName,
           porta: s.suggestedPort ? String(s.suggestedPort) : '',
           dominio: '',
         })),
@@ -216,6 +214,15 @@ export default function NewDeploy() {
 
   const nomeDuplicado = nomesExistentes.includes(nome.trim());
 
+  /**
+   * Nome do app de cada service: `{projeto}-{app}`. Nomes de app são únicos no servidor,
+   * e dois monorepos com um `apps/web` colidiriam se o service levasse só o nome da pasta.
+   */
+  const nomeServico = (s: ServicoDetectado) => `${nome.trim()}-${s.suggestedName}`;
+  const servicosDuplicados = ehMonorepo
+    ? servicos!.filter((s) => s.incluir && nomesExistentes.includes(nomeServico(s))).map(nomeServico)
+    : [];
+
   const enviar = async () => {
     setEnviando(true);
     try {
@@ -227,7 +234,7 @@ export default function NewDeploy() {
           branch: branch.trim() || 'main',
           envVars: serializeEnv(env),
           services: incluidos.map((s) => ({
-            name: s.nome,
+            name: nomeServico(s),
             appDir: s.appDir,
             workspacePackage: s.workspacePackage,
             type: s.type,
@@ -369,6 +376,13 @@ export default function NewDeploy() {
                     existente.
                   </p>
                 )}
+                {servicosDuplicados.length > 0 && (
+                  <p className="m-0 text-xs leading-4 text-red">
+                    Já existe app com o nome{' '}
+                    <span className="font-mono">{servicosDuplicados.join(', ')}</span>. Escolha outro
+                    nome de projeto.
+                  </p>
+                )}
               </div>
 
               {ehMonorepo ? (
@@ -390,7 +404,7 @@ export default function NewDeploy() {
                         className="size-4 accent-[hsl(var(--brand-strong))]"
                       />
                       <div className="flex min-w-0 flex-col">
-                        <span className="truncate text-[13px] font-medium text-text-1">{s.nome}</span>
+                        <span className="truncate text-[13px] font-medium text-text-1">{nomeServico(s)}</span>
                         <span className="truncate font-mono tabular-nums text-2xs text-text-3">
                           {s.workspacePackage} · {s.type}
                           {s.hasPrisma && ' · prisma'}
@@ -405,7 +419,7 @@ export default function NewDeploy() {
                             setServicos(copia);
                           }}
                           placeholder="porta"
-                          aria-label={`Porta de ${s.nome}`}
+                          aria-label={`Porta de ${nomeServico(s)}`}
                           aria-invalid={portasDuplicadas.has(s.porta.trim())}
                           className={cn(
                             'font-mono tabular-nums text-[12.5px]',
@@ -424,7 +438,7 @@ export default function NewDeploy() {
                           setServicos(copia);
                         }}
                         placeholder="dominio.com (opcional)"
-                        aria-label={`Domínio de ${s.nome}`}
+                        aria-label={`Domínio de ${nomeServico(s)}`}
                         className="font-mono tabular-nums text-[12.5px]"
                       />
                     </div>
@@ -525,6 +539,7 @@ export default function NewDeploy() {
               disabled={
                 !nome.trim() ||
                 nomeDuplicado ||
+                servicosDuplicados.length > 0 ||
                 Boolean(erroPorta) ||
                 portasDuplicadas.size > 0 ||
                 (ehMonorepo && servicos!.some((s) => s.incluir && !s.porta.trim())) ||
