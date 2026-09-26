@@ -8,6 +8,7 @@ import {
   detectPackageManager,
   installCmd,
   runScriptCmd,
+  workspaceBuildCmd,
   execCmd,
   turboBuildCmd,
   turboBuildManyCmd,
@@ -285,4 +286,19 @@ test('hardenedPath põe o node configurado depois dos bins locais e antes do sis
   delete process.env.DEPLOY_NODE_BIN;
   fs.rmSync(raiz, { recursive: true, force: true });
   fs.rmSync(nodeDir, { recursive: true, force: true });
+});
+
+// --- workspaceBuildCmd ---
+test('workspaceBuildCmd pnpm includes workspace dependencies', () => {
+  assert.equal(workspaceBuildCmd(pnpm, ['@orbita/api']), 'pnpm --filter @orbita/api... run build');
+  assert.equal(
+    workspaceBuildCmd(pnpm, ['@orbita/api', '@orbita/web']),
+    'pnpm --filter @orbita/api... --filter @orbita/web... run build',
+  );
+});
+test('workspaceBuildCmd npm falls back to single-package builds', () => {
+  assert.equal(
+    workspaceBuildCmd(npm, ['@a/x', '@a/y']),
+    'npm run build --workspace @a/x && npm run build --workspace @a/y',
+  );
 });

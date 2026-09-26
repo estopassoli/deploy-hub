@@ -114,6 +114,27 @@ export function execCmd(pm: PmInfo, opts: { pkg?: string; argv: string[] }): str
   }
 }
 
+/**
+ * Build workspace packages together with the workspace packages they depend on,
+ * for monorepos without Turbo.
+ *
+ * `pnpm --filter <pkg> run build` builds only the app itself: internal libs that
+ * resolve through `main: ./dist/...` stay unbuilt and the app fails with
+ * "Cannot find module '@scope/lib'". The trailing `...` selects the package plus
+ * its dependencies; pnpm runs them in topological order and skips packages
+ * without a `build` script. Yarn Berry gets the same via `workspaces foreach -R`.
+ * npm and Yarn classic have no equivalent and keep the single-package build.
+ */
+export function workspaceBuildCmd(pm: PmInfo, pkgs: string[]): string {
+  if (pm.name === 'pnpm') {
+    return `pnpm ${pkgs.map((p) => `--filter ${p}...`).join(' ')} run build`;
+  }
+  if (pm.name === 'yarn' && pm.berry) {
+    return `yarn workspaces foreach -Rt ${pkgs.map((p) => `--from ${p}`).join(' ')} run build`;
+  }
+  return pkgs.map((p) => runScriptCmd(pm, { pkg: p, script: 'build' })).join(' && ');
+}
+
 /** Turbo build scoped to a package (invoked via the package manager since turbo may not be global). */
 export function turboBuildCmd(pm: PmInfo, pkg: string): string {
   return execCmd(pm, { argv: ['turbo', 'run', 'build', `--filter=${pkg}`] });

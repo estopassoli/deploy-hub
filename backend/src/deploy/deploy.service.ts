@@ -22,6 +22,7 @@ import {
   execCmd,
   turboBuildCmd,
   turboBuildManyCmd,
+  workspaceBuildCmd,
   binResolverPrelude,
   hardenedPath,
 } from './package-manager';
@@ -1081,7 +1082,7 @@ export class DeployService implements OnModuleInit {
           if (isMonorepo && pkg && hasTurbo) {
             buildCmd = turboBuildCmd(pm, pkg);
           } else if (isMonorepo && pkg) {
-            buildCmd = runScriptCmd(pm, { pkg, script: 'build' });
+            buildCmd = workspaceBuildCmd(pm, [pkg]);
           } else if (effectiveType === 'nestjs') {
             buildCmd = execCmd(pm, { argv: ['nest', 'build'] });
           } else {
@@ -1492,12 +1493,10 @@ export class DeployService implements OnModuleInit {
       if (hasTurbo && pkgs.length) {
         this.log(key, `▶ Building ${pkgs.length} services with Turbo...`, deploy.id);
         await this.runCommand(turboBuildManyCmd(pm, pkgs), releaseDir, key, deploy.id, projectEnv);
-      } else {
-        for (const svc of hostServices) {
-          if (!svc.workspacePackage) continue;
-          this.log(key, `▶ [${svc.name}] Building...`, deploy.id);
-          await this.runCommand(runScriptCmd(pm, { pkg: svc.workspacePackage, script: 'build' }), releaseDir, key, deploy.id, projectEnv);
-        }
+      } else if (pkgs.length) {
+        // One invocation for every service: shared workspace libs build once, in dependency order.
+        this.log(key, `▶ Building ${pkgs.length} services and their workspace dependencies...`, deploy.id);
+        await this.runCommand(workspaceBuildCmd(pm, pkgs), releaseDir, key, deploy.id, projectEnv);
       }
       this.log(key, '✓ Build completed', deploy.id);
 
@@ -1694,7 +1693,7 @@ export class DeployService implements OnModuleInit {
         const hasTurbo = fs.existsSync(path.join(releaseDir, 'turbo.json'));
         const buildCmd = hasTurbo
           ? turboBuildCmd(pm, svc.workspacePackage)
-          : runScriptCmd(pm, { pkg: svc.workspacePackage, script: 'build' });
+          : workspaceBuildCmd(pm, [svc.workspacePackage]);
         this.log(key, `▶ [${svc.name}] Building...`, deploy.id);
         await this.runCommand(buildCmd, releaseDir, key, deploy.id, projectEnv);
         this.log(key, '✓ Build completed', deploy.id);
